@@ -50,9 +50,9 @@ double RELU(double x);
 
 void RELU_matrix(Matrix* in, Matrix* out);
 
-char RELU_backward(double pointer);
+char RELU_der(double pointer);
 
-Matrix* RELU_backward_matrix(Matrix* matrix);
+void RELU_backward(const Matrix* Z, Matrix* dA, Matrix* dZ);
 
 int get_max_output_node_index(NeuralNetwork* network);
 

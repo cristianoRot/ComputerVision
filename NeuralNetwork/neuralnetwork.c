@@ -44,9 +44,9 @@ NeuralNetwork* neuralNetwork_create(int* layers, int count_layers) {
             printf("Error while allocating memory for A in layer %d.\n", i);
             // Cleanup allocated memory before returning
             for (int j = 0; j < i; j++) {
-                free_matrix(net_layers[j].A);
-                if (j > 0) free_matrix(net_layers[j].b);
-                if (j < count_layers - 1) free_matrix(net_layers[j].W);
+                matrix_free(net_layers[j].A);
+                if (j > 0) matrix_free(net_layers[j].b);
+                if (j < count_layers - 1) matrix_free(net_layers[j].W);
             }
             free(net_layers);
             free(neuralNetwork);
@@ -59,9 +59,9 @@ NeuralNetwork* neuralNetwork_create(int* layers, int count_layers) {
                 printf("Error while allocating memory for bias in layer %d.\n", i);
                 // Cleanup allocated memory before returning
                 for (int j = 0; j <= i; j++) {
-                    free_matrix(net_layers[j].A);
-                    if (j > 0) free_matrix(net_layers[j].b);
-                    if (j < count_layers - 1) free_matrix(net_layers[j].W);
+                    matrix_free(net_layers[j].A);
+                    if (j > 0) matrix_free(net_layers[j].b);
+                    if (j < count_layers - 1) matrix_free(net_layers[j].W);
                 }
                 free(net_layers);
                 free(neuralNetwork);
@@ -75,9 +75,9 @@ NeuralNetwork* neuralNetwork_create(int* layers, int count_layers) {
                 printf("Error while allocating memory for W in layer %d.\n", i);
                 // Cleanup allocated memory before returning
                 for (int j = 0; j <= i; j++) {
-                    free_matrix(net_layers[j].A);
-                    if (j > 0) free_matrix(net_layers[j].b);
-                    if (j < count_layers - 1) free_matrix(net_layers[j].W);
+                    matrix_free(net_layers[j].A);
+                    if (j > 0) matrix_free(net_layers[j].b);
+                    if (j < count_layers - 1) matrix_free(net_layers[j].W);
                 }
                 free(net_layers);
                 free(neuralNetwork);
@@ -119,7 +119,7 @@ void neuralNetwork_train(NeuralNetwork* network, char* dataset_path) {
             
             back_prop(network, onehot_mtx);
 
-            free_matrix(onehot_mtx);
+            matrix_free(onehot_mtx);
         }
 
         double accuracy = (double)correct_prediction / total_data;
@@ -142,14 +142,56 @@ void adjust_learning_rate(int epoch) {
 }
 
 void back_prop(NeuralNetwork* network, Matrix* y_true) {
-    int currentLayerIndex = network->num_layers - 1;
-    Layer* currentLayer = &network->layers[currentLayerIndex];
+    int last = network->num_layers - 1;
+    Layer* layer = &network->layers[last];
+    Layer* prevLayer = &network->layers[last - 1];
 
-    // Caluclate gradiant for output layer
-    currentLayer->dA = matrix_scalar_product(matrix_sub(currentLayer->A, y_true), 2);
-    currentLayer->dZ = matrix_linear_product(softmax_der_matrix(currentLayer->Z), currentLayer->dA);
+    // calculate gradient for output layer
 
-    // ...
+    // • dA = 2*(A - y_true)
+    Matrix *diff = matrix_sub(layer->A, y_true);
+    Matrix *dA = matrix_scalar_product(diff, 2.0);
+    matrix_free(diff);
+
+    if (layer->dA) matrix_free(layer->dA);
+    layer->dA = dA;
+
+    softmax_backward(layer->dZ, layer->A, layer->dA);
+
+    // • dW = dZ · A_prev^T
+    Matrix *A_T = matrix_T(prevLayer->A);
+    Matrix *dW  = matrix_product(layer->dZ, A_T);
+    matrix_free(A_T);
+
+    if (layer->dW) matrix_free(layer->dW);
+    layer->dW = dW;
+
+    // • db = dZ
+    if (layer->db) matrix_free(layer->db);
+    layer->db = matrix_new(layer->dZ->row, layer->dZ->col);
+    matrix_copy(layer->dZ, layer->db);
+
+
+    // calculate gradient for other layers
+
+    for (int i = last - 1; i > 0; i--)
+    {
+        layer = &network->layers[i];
+        prevLayer = &network->layers[i - 1];
+        Layer* nextLayer = &network->layers[i + 1];
+
+        // • dA(i) = W_T(i + 1) · dZ(i + 1)
+        Matrix* W_T = matrix_T(nextLayer->W);
+        Matrix* dA = matrix_product(W_T, nextLayer->dZ);
+        matrix_free(W_T);
+        if (layer->dA) matrix_free(layer->dA);
+        layer->dA = dA;
+
+        // • dZ(i) = RELU_back(Z(i)) · dA(i)
+        RELU_backward(layer->Z, layer->dA, layer->dZ);
+
+        
+    }
 }
 
 void forward_prop(NeuralNetwork* network, Matrix* input) {
@@ -164,7 +206,7 @@ void forward_prop(NeuralNetwork* network, Matrix* input) {
         // Z = W · A_prev + b
         Matrix *prod = matrix_product(layer->W, prev_layer->A);
         layer->Z = matrix_sum(prod, layer->b);
-        free_matrix(prod);
+        matrix_free(prod);
 
         if (i < L-1) {
             RELU_matrix(layer->Z, layer->A);
@@ -254,24 +296,21 @@ void RELU_matrix(Matrix* matrixIn, Matrix* matrixOut) {
     }
 }
 
-char RELU_backward(double pointer) {
+char RELU_der(double pointer) {
     return pointer > 0 ? 1 : 0;
 }
 
-Matrix* RELU_backward_matrix(Matrix* matrix) {
-    int row_count = matrix->row;
-    int col_count = matrix->col;
+void RELU_backward(const Matrix* Z, Matrix* dA, Matrix* dZ) {
+    int rows = Z->row;
+    int cols = Z->col;
 
-    Matrix* result = matrix_create(row_count, col_count);
-    if (result == NULL) return NULL;
-
-    for (int r = 0; r < row_count; r++) {
-        for (int c = 0; c < col_count; c++) {
-            result->data[r][c] = RELU_backward(matrix->data[r][c]);
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) 
+        {
+            char act_der = RELU_der(Z->data[r][c]);
+            dZ->data[r][c] = dA->data[r][c] * act_der;
         }
     }
-
-    return result;
 }
 
 int get_max_output_node_index(NeuralNetwork* network) {
@@ -391,7 +430,7 @@ int initialize_dataset(Matrix*** dataset, int** label, char* dataset_path, int n
 
 void free_dataset(Matrix** dataset, int total_images) {
     for (int i = 0; i < total_images; i++) {
-        free_matrix(dataset[i]);
+        matrix_free(dataset[i]);
     }
     free(dataset);
 }

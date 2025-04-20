@@ -145,6 +145,19 @@ Matrix* matrix_linear_product(Matrix* m1, Matrix* m2) {
     return result;
 }
 
+void matrix_copy(Matrix* m1, Matrix* m2) {
+    if(m1 == NULL || m2 == NULL || m1->row != m2->row || m1->col != m2->col) {
+        printf("Unable to copy matrix");  
+        return NULL;
+    }
+
+    for (int r = 0; r < m1->row; r++) {
+        for (int c = 0; c < m1->col; c++) {
+            m2->data[r][c] = m1->data[r][c];
+        }
+    }
+}
+
 void matrix_print(Matrix* data) {
     for(int r = 0; r < data->row; r++){
         for(int c = 0; c < data->col; c++){
@@ -155,7 +168,7 @@ void matrix_print(Matrix* data) {
     }
 }
 
-void free_matrix(Matrix* mat) {
+void matrix_free(Matrix* mat) {
     if (mat != NULL && mat->data != NULL) {
         // Libera ogni riga della matrice
         for (int i = 0; i < mat->row; i++) {

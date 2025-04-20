@@ -27,8 +27,10 @@ Matrix* matrix_scalar_product(Matrix* m1, double scalar);
 
 Matrix* matrix_linear_product(Matrix* m1, Matrix* m2);
 
+void matrix_copy(Matrix* m1, Matrix* m2);
+
 void matrix_print(Matrix* data);
 
-void free_matrix(Matrix* mat);
+void matrix_free(Matrix* mat);
 
 #endif
