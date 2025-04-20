@@ -4,46 +4,46 @@
 #include "matrix.h"
 
 Matrix* matrix_create(int row, int col) {
-    Matrix* matrix = (Matrix*) malloc(sizeof(Matrix));
+    Matrix* data = (Matrix*) malloc(sizeof(Matrix));
 
-    if (matrix == NULL) {
-        printf("Error during matrix creation.\n");
+    if (data == NULL) {
+        printf("Error during data creation.\n");
         return NULL;
     }
 
-    matrix->matrix = (double**) malloc(row * sizeof(double*));
+    data->data = (double**) malloc(row * sizeof(double*));
 
     for (int i = 0; i < row; i++) {
-        matrix->matrix[i] = (double*) malloc(col * sizeof(double));
+        data->data[i] = (double*) malloc(col * sizeof(double));
     }
     
-    matrix->row = row;
-    matrix->col = col;
+    data->row = row;
+    data->col = col;
 
-    return matrix;
+    return data;
 }
 
-double matrix_get(Matrix* matrix, int r, int c) {
-    return matrix->matrix[r][c];
+double matrix_get(Matrix* data, int r, int c) {
+    return data->data[r][c];
 }
 
-void matrix_set(Matrix* matrix, int r, int c, double v) {
-    matrix->matrix[r][c] = v;
+void matrix_set(Matrix* data, int r, int c, double v) {
+    data->data[r][c] = v;
 }
 
-Matrix* matrix_T(Matrix* matrix) {
-    if(matrix == NULL) {
+Matrix* matrix_T(Matrix* data) {
+    if(data == NULL) {
         printf("Unable to transpose.");  
         return NULL;
     }
 
-    Matrix* matrix_T = matrix_create(matrix->col, matrix->row);
+    Matrix* matrix_T = matrix_create(data->col, data->row);
 
     if (matrix_T == NULL) return NULL;
 
-    for(int r = 0; r < matrix->row; r++){
-        for(int c = 0; c < matrix->col; c++){
-            matrix_T->matrix[c][r] = matrix->matrix[r][c];
+    for(int r = 0; r < data->row; r++){
+        for(int c = 0; c < data->col; c++){
+            matrix_T->data[c][r] = data->data[r][c];
         }
     }
 
@@ -56,16 +56,16 @@ Matrix* matrix_sub(Matrix* m1, Matrix* m2) {
         return NULL;
     } 
 
-    Matrix* matrix = matrix_create(m1->row, m1->col);
-    if (matrix == NULL) return NULL;
+    Matrix* data = matrix_create(m1->row, m1->col);
+    if (data == NULL) return NULL;
     
     for(int r = 0; r < m1->row; r++){
         for(int c = 0; c < m1->col; c++){
-            matrix->matrix[r][c] = m1->matrix[r][c] - m2->matrix[r][c];
+            data->data[r][c] = m1->data[r][c] - m2->data[r][c];
         }
     }
 
-    return matrix;
+    return data;
 }
 
 Matrix* matrix_sum(Matrix* m1, Matrix* m2) {
@@ -76,17 +76,17 @@ Matrix* matrix_sum(Matrix* m1, Matrix* m2) {
     }
 
     // Creazione della matrice risultato
-    Matrix* matrix = matrix_create(m1->row, m1->col);
-    if (matrix == NULL) return NULL;
+    Matrix* data = matrix_create(m1->row, m1->col);
+    if (data == NULL) return NULL;
     
     // Esegui la somma elemento per elemento
     for (int r = 0; r < m1->row; r++) {
         for (int c = 0; c < m1->col; c++) {
-            matrix->matrix[r][c] = m1->matrix[r][c] + m2->matrix[r][c];
+            data->data[r][c] = m1->data[r][c] + m2->data[r][c];
         }
     }
 
-    return matrix;
+    return data;
 }
 
 Matrix* matrix_product(Matrix* m1, Matrix* m2) {
@@ -102,9 +102,9 @@ Matrix* matrix_product(Matrix* m1, Matrix* m2) {
         for(int c = 0; c < m2->col; c++){
             double x = 0;
             for (int n = 0; n < m1->col; n++) {
-                x += m1->matrix[r][n] * m2->matrix[n][c];
+                x += m1->data[r][n] * m2->data[n][c];
             }
-            res->matrix[r][c] = x;
+            res->data[r][c] = x;
         }
     }
 
@@ -122,7 +122,7 @@ Matrix* matrix_scalar_product(Matrix* m1, double scalar) {
     
     for (int r = 0; r < m1->row; r++) {
         for (int c = 0; c < m1->col; c++) {
-            result->matrix[r][c] = m1->matrix[r][c] * scalar;
+            result->data[r][c] = m1->data[r][c] * scalar;
         }
     }
     return result;
@@ -139,16 +139,16 @@ Matrix* matrix_linear_product(Matrix* m1, Matrix* m2) {
 
     for (int r = 0; r < m1->row; r++) {
         for (int c = 0; c < m1->col; c++) {
-            result->matrix[r][c] = m1->matrix[r][c] * m2->matrix[r][c];
+            result->data[r][c] = m1->data[r][c] * m2->data[r][c];
         }
     }
     return result;
 }
 
-void matrix_print(Matrix* matrix) {
-    for(int r = 0; r < matrix->row; r++){
-        for(int c = 0; c < matrix->col; c++){
-            printf("%f ", matrix->matrix[r][c]);
+void matrix_print(Matrix* data) {
+    for(int r = 0; r < data->row; r++){
+        for(int c = 0; c < data->col; c++){
+            printf("%f ", data->data[r][c]);
         }
         
         printf("\n");
@@ -156,16 +156,16 @@ void matrix_print(Matrix* matrix) {
 }
 
 void free_matrix(Matrix* mat) {
-    if (mat != NULL && mat->matrix != NULL) {
+    if (mat != NULL && mat->data != NULL) {
         // Libera ogni riga della matrice
         for (int i = 0; i < mat->row; i++) {
-            if (mat->matrix[i] != NULL) {
-                free(mat->matrix[i]);
-                mat->matrix[i] = NULL;
+            if (mat->data[i] != NULL) {
+                free(mat->data[i]);
+                mat->data[i] = NULL;
             }
         }
-        free(mat->matrix);
-        mat->matrix = NULL;
+        free(mat->data);
+        mat->data = NULL;
     }
     free(mat);
 }

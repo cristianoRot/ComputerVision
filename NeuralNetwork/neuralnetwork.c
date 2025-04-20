@@ -27,7 +27,7 @@ NeuralNetwork* neuralNetwork_create(int* layers, int count_layers) {
         return NULL;
     }
 
-    Layers* net_layers = (Layers*) malloc(sizeof(Layers) * count_layers);
+    Layer* net_layers = (Layer*) malloc(sizeof(Layer) * count_layers);
     if (net_layers == NULL) {
         printf("Error while allocating memory for the layers.\n");
         free(neuralNetwork);  // Free previously allocated memory
@@ -38,15 +38,15 @@ NeuralNetwork* neuralNetwork_create(int* layers, int count_layers) {
     neuralNetwork->num_layers = count_layers;
 
     for (int i = 0; i < count_layers; i++) {
-        net_layers[i].nodes = matrix_create(layers[i], 1);
+        net_layers[i].A = matrix_create(layers[i], 1);
         
-        if (net_layers[i].nodes == NULL) {
-            printf("Error while allocating memory for nodes in layer %d.\n", i);
+        if (net_layers[i].A == NULL) {
+            printf("Error while allocating memory for A in layer %d.\n", i);
             // Cleanup allocated memory before returning
             for (int j = 0; j < i; j++) {
-                free_matrix(net_layers[j].nodes);
-                if (j > 0) free_matrix(net_layers[j].bias);
-                if (j < count_layers - 1) free_matrix(net_layers[j].weights);
+                free_matrix(net_layers[j].A);
+                if (j > 0) free_matrix(net_layers[j].b);
+                if (j < count_layers - 1) free_matrix(net_layers[j].W);
             }
             free(net_layers);
             free(neuralNetwork);
@@ -54,14 +54,14 @@ NeuralNetwork* neuralNetwork_create(int* layers, int count_layers) {
         }
 
         if (i > 0) {
-            net_layers[i].bias = matrix_create(layers[i], 1);
-            if (net_layers[i].bias == NULL) {
+            net_layers[i].b = matrix_create(layers[i], 1);
+            if (net_layers[i].b == NULL) {
                 printf("Error while allocating memory for bias in layer %d.\n", i);
                 // Cleanup allocated memory before returning
                 for (int j = 0; j <= i; j++) {
-                    free_matrix(net_layers[j].nodes);
-                    if (j > 0) free_matrix(net_layers[j].bias);
-                    if (j < count_layers - 1) free_matrix(net_layers[j].weights);
+                    free_matrix(net_layers[j].A);
+                    if (j > 0) free_matrix(net_layers[j].b);
+                    if (j < count_layers - 1) free_matrix(net_layers[j].W);
                 }
                 free(net_layers);
                 free(neuralNetwork);
@@ -70,14 +70,14 @@ NeuralNetwork* neuralNetwork_create(int* layers, int count_layers) {
         }
 
         if (i < count_layers - 1) {
-            net_layers[i].weights = matrix_create(layers[i + 1], layers[i]);
-            if (net_layers[i].weights == NULL) {
-                printf("Error while allocating memory for weights in layer %d.\n", i);
+            net_layers[i].W = matrix_create(layers[i + 1], layers[i]);
+            if (net_layers[i].W == NULL) {
+                printf("Error while allocating memory for W in layer %d.\n", i);
                 // Cleanup allocated memory before returning
                 for (int j = 0; j <= i; j++) {
-                    free_matrix(net_layers[j].nodes);
-                    if (j > 0) free_matrix(net_layers[j].bias);
-                    if (j < count_layers - 1) free_matrix(net_layers[j].weights);
+                    free_matrix(net_layers[j].A);
+                    if (j > 0) free_matrix(net_layers[j].b);
+                    if (j < count_layers - 1) free_matrix(net_layers[j].W);
                 }
                 free(net_layers);
                 free(neuralNetwork);
@@ -98,7 +98,7 @@ void neuralNetwork_train(NeuralNetwork* network, char* dataset_path) {
     int* label = NULL;
 
     int total_data = initialize_dataset(&dataset, &label, dataset_path, 19);
-    int output_dimension = network->layers[network->num_layers - 1].nodes->row;
+    int output_dimension = network->layers[network->num_layers - 1].A->row;
     int epoch = 1;
 
     while (1) {
@@ -141,123 +141,36 @@ void adjust_learning_rate(int epoch) {
     }
 }
 
-void back_prop(NeuralNetwork* network, Matrix* one_hot) {
-    if (network == NULL || one_hot == NULL) {
-        printf("ERROR\n");
-        return; 
-    }
+void back_prop(NeuralNetwork* network, Matrix* y_true) {
+    int currentLayerIndex = network->num_layers - 1;
+    Layer* currentLayer = &network->layers[currentLayerIndex];
 
-    int last_index = network->num_layers - 1; 
-    Matrix* loss = matrix_sub(network->layers[last_index].nodes, one_hot);
+    // Caluclate gradiant for output layer
+    currentLayer->dA = matrix_scalar_product(matrix_sub(currentLayer->A, y_true), 2);
+    currentLayer->dZ = matrix_linear_product(softmax_der_matrix(currentLayer->Z), currentLayer->dA);
 
-    if (loss == NULL) {
-        printf("Error in loss\n");
-        return;
-    }    
-
-    for (int layer = last_index; layer > 0; layer--) {
-        printf("Current layer %d\n", layer);
-
-        Matrix* prev_layer_T = matrix_T(network->layers[layer - 1].nodes);
-
-        if (prev_layer_T == NULL) {
-            printf("Error in prev_layer_T\n");
-            return;
-        }  
-
-        Matrix* grad_W_ = matrix_product(loss, prev_layer_T);
-        if (grad_W_ == NULL) {
-            printf("Error in grad_W_\n");
-            return;
-        }  
-
-        Matrix* grad_W = matrix_scalar_product(grad_W_, learning_rate);
-        if (grad_W == NULL) {
-            printf("Error in grad_W\n");
-            return;
-        }  
-
-        Matrix* grad_B = matrix_scalar_product(loss, learning_rate);
-        if (grad_B == NULL) {
-            printf("Error in grad_B\n");
-            return;
-        }  
-
-        free_matrix(prev_layer_T);
-        free_matrix(grad_W_);
-
-        if (network->layers[layer].weights == NULL || network->layers[layer].bias == NULL) {
-            printf("Error: Failed to update weights or bias.\n");
-            return;
-        }
-
-        network->layers[layer].weights = matrix_sub(network->layers[layer].weights, grad_W);
-        network->layers[layer].bias = matrix_sub(network->layers[layer].bias, grad_B);
-
-        free_matrix(grad_W);
-        free_matrix(grad_B);
-
-        if (layer <= 1) 
-            continue;
-            
-        Matrix* transposed_weights = matrix_T(network->layers[layer].weights);
-
-        if (transposed_weights == NULL) {
-            printf("Error in transposed_weights\n");
-            return;
-        }
-
-        Matrix* prev_error = matrix_product(transposed_weights, loss);
-
-        if (prev_error == NULL) {
-            printf("Error in prev_error\n");
-            return;
-        }
-
-        Matrix* prev_layer_RELU_der = RELU_der_matrix(network->layers[layer - 1].nodes);
-
-        if (prev_layer_RELU_der == NULL) {
-            printf("Error in prev_layer_RELU_der\n");
-            return;
-        }
-
-        Matrix* temp_prev_error = matrix_linear_product(prev_error, prev_layer_RELU_der);
-
-        if (temp_prev_error == NULL) {
-            printf("Error in temp_prev_error\n");
-            return;
-        }
-
-        free_matrix(loss);
-        loss = temp_prev_error;
-
-        free_matrix(prev_error);
-        free_matrix(prev_layer_RELU_der);
-        free_matrix(transposed_weights);
-    }
-
-    free_matrix(loss);
+    // ...
 }
 
 void forward_prop(NeuralNetwork* network, Matrix* input) {
-    network->layers[0].nodes = input;
+    int L = network->num_layers;
 
-    int num_layers = network->num_layers;
+    network->layers[0].A = input;
 
-    for (int i = 0; i < network->num_layers - 1; i++) {
-        Matrix* product_matrix = matrix_product(network->layers[i].weights, network->layers[i].nodes);
-        Matrix* new_layer = matrix_sum(product_matrix, network->layers[i + 1].bias);
+    for (int i = 1; i < L; ++i) {
+        Layer *layer = &network->layers[i];
+        Layer *prev_layer = &network->layers[i-1];
 
-        free_matrix(product_matrix);
+        // Z = W · A_prev + b
+        Matrix *prod = matrix_product(layer->W, prev_layer->A);
+        layer->Z = matrix_sum(prod, layer->b);
+        free_matrix(prod);
 
-        if (i < num_layers - 2) {
-            RELU_matrix(new_layer);
+        if (i < L-1) {
+            RELU_matrix(layer->Z, layer->A);
         } else {
-            softmax(new_layer);
+            softmax(layer->Z, layer->A);
         }
-
-        free_matrix(network->layers[i + 1].nodes);
-        network->layers[i + 1].nodes = new_layer;
     }
 }
 
@@ -273,45 +186,79 @@ Matrix* onehot(int label, int num_classes) {
     return result;
 }
 
-void softmax(Matrix* matrix) {
-    double sum = 0;
-    double max = matrix_get(matrix, 0, 0);
-    
-    for (int i = 1; i < matrix->row; i++) {
-        if (matrix_get(matrix, i, 0) > max) {
-            max = matrix_get(matrix, i, 0);
+void softmax(const Matrix *in, Matrix *out) {
+    int R = in->row;
+    int C = in->col;
+
+    for (int j = 0; j < C; ++j) {
+        double max_val = in->data[0][j];
+        for (int i = 1; i < R; ++i) {
+            double v = in->data[i][j];
+            if (v > max_val) {
+                max_val = v;
+            }
+        }
+
+        double sum_exp = 0.0;
+        for (int i = 0; i < R; ++i) {
+            double e = exp(in->data[i][j] - max_val);
+            out->data[i][j] = e;
+            sum_exp += e;
+        }
+
+        if (sum_exp == 0.0) {
+            double uniform = 1.0 / R;
+            for (int i = 0; i < R; ++i) {
+                out->data[i][j] = uniform;
+            }
+        } else {
+            for (int i = 0; i < R; ++i) {
+                out->data[i][j] /= sum_exp;
+            }
         }
     }
-
-    for (int i = 0; i < matrix->row; i++) {
-        sum += exp(matrix_get(matrix, i, 0) - max);
-    }
-
-    for (int i = 0; i < matrix->row; i++) {
-        matrix_set(matrix, i, 0, exp(matrix_get(matrix, i, 0) - max) / sum);
-    }
-} 
-
-void RELU(double* pointer) {
-    if (*pointer < 0) *pointer = 0;
 }
 
-void RELU_matrix(Matrix* pointer) {
-    int row_count = pointer->row;
-    int col_count = pointer->col;
+void softmax_backward(Matrix* dZ, Matrix* A, Matrix* dA) {
+    int C = A->row;
+    int M = A->col;
+
+    for (int j = 0; j < M; ++j) {
+        for (int i = 0; i < C; ++i) {
+            double sum = 0.0;
+            for (int k = 0; k < C; ++k) {
+                double ai = A->data[i][j];
+                double ak = A->data[k][j];
+                double jac = (i == k)
+                             ? ai * (1.0 - ai)
+                             : -ai * ak;
+                sum += jac * dA->data[k][j];
+            }
+            dZ->data[i][j] = sum;
+        }
+    }
+}
+
+double RELU(double x) {
+    return x > 0 ? x : 0;
+}
+
+void RELU_matrix(Matrix* matrixIn, Matrix* matrixOut) {
+    int row_count = matrixIn->row;
+    int col_count = matrixIn->col;
 
     for (int r = 0; r < row_count; r++) {
         for (int c = 0; c < col_count; c++) {
-            RELU(&(pointer->matrix[r][c]));
+            matrixOut->data[r][c] = RELU(matrixIn->data[r][c]);
         }
     }
 }
 
-char RELU_der(double pointer) {
+char RELU_backward(double pointer) {
     return pointer > 0 ? 1 : 0;
 }
 
-Matrix* RELU_der_matrix(Matrix* matrix) {
+Matrix* RELU_backward_matrix(Matrix* matrix) {
     int row_count = matrix->row;
     int col_count = matrix->col;
 
@@ -320,7 +267,7 @@ Matrix* RELU_der_matrix(Matrix* matrix) {
 
     for (int r = 0; r < row_count; r++) {
         for (int c = 0; c < col_count; c++) {
-            result->matrix[r][c] = RELU_der(matrix->matrix[r][c]);
+            result->data[r][c] = RELU_backward(matrix->data[r][c]);
         }
     }
 
@@ -328,7 +275,7 @@ Matrix* RELU_der_matrix(Matrix* matrix) {
 }
 
 int get_max_output_node_index(NeuralNetwork* network) {
-    Matrix* output_layer = network->layers[network->num_layers - 1].nodes;
+    Matrix* output_layer = network->layers[network->num_layers - 1].A;
 
     double max = matrix_get(output_layer, 0, 0);
     int index = 0;
@@ -459,25 +406,25 @@ void save_model(NeuralNetwork* network, char* filename) {
     fwrite(&(network->num_layers), sizeof(int), 1, file);
 
     for (int i = 0; i < network->num_layers; i++) {
-        Layers layer = network->layers[i];
+        Layer layer = network->layers[i];
 
-        int rows = layer.nodes->row;
-        int cols = layer.nodes->col;
+        int rows = layer.A->row;
+        int cols = layer.A->col;
         fwrite(&rows, sizeof(int), 1, file);
         fwrite(&cols, sizeof(int), 1, file);
 
-        if (layer.weights != NULL) {
-            fwrite(&(layer.weights->row), sizeof(int), 1, file);
-            fwrite(&(layer.weights->col), sizeof(int), 1, file);
-            for (int r = 0; r < layer.weights->row; r++) {
-                fwrite(layer.weights->matrix[r], sizeof(double), layer.weights->col, file);
+        if (layer.W != NULL) {
+            fwrite(&(layer.W->row), sizeof(int), 1, file);
+            fwrite(&(layer.W->col), sizeof(int), 1, file);
+            for (int r = 0; r < layer.W->row; r++) {
+                fwrite(layer.W->data[r], sizeof(double), layer.W->col, file);
             }
         }
 
-        if (layer.bias != NULL) {
-            fwrite(&(layer.bias->row), sizeof(int), 1, file);
-            fwrite(&(layer.bias->col), sizeof(int), 1, file);
-            fwrite(layer.bias->matrix[0], sizeof(double), layer.bias->row * layer.bias->col, file);
+        if (layer.b != NULL) {
+            fwrite(&(layer.b->row), sizeof(int), 1, file);
+            fwrite(&(layer.b->col), sizeof(int), 1, file);
+            fwrite(layer.b->data[0], sizeof(double), layer.b->row * layer.b->col, file);
         }
     }
 
@@ -494,30 +441,30 @@ NeuralNetwork* load_model(const char* filename) {
     NeuralNetwork* network = malloc(sizeof(NeuralNetwork));
     fread(&(network->num_layers), sizeof(int), 1, file);
 
-    network->layers = malloc(sizeof(Layers) * network->num_layers);
+    network->layers = malloc(sizeof(Layer) * network->num_layers);
 
     for (int i = 0; i < network->num_layers; i++) {
-        Layers* layer = &(network->layers[i]);
+        Layer* layer = &(network->layers[i]);
 
         int rows, cols;
         fread(&rows, sizeof(int), 1, file);
         fread(&cols, sizeof(int), 1, file);
-        layer->nodes = matrix_create(rows, cols);
+        layer->A = matrix_create(rows, cols);
 
         if (i < network->num_layers - 1) {
             fread(&rows, sizeof(int), 1, file);
             fread(&cols, sizeof(int), 1, file);
-            layer->weights = matrix_create(rows, cols);
+            layer->W = matrix_create(rows, cols);
             for (int r = 0; r < rows; r++) {
-                fread(layer->weights->matrix[r], sizeof(double), cols, file);
+                fread(layer->W->data[r], sizeof(double), cols, file);
             }
         }
 
         if (i > 0) {
             fread(&rows, sizeof(int), 1, file);
             fread(&cols, sizeof(int), 1, file);
-            layer->bias = matrix_create(rows, cols);
-            fread(layer->bias->matrix[0], sizeof(double), rows * cols, file);
+            layer->b = matrix_create(rows, cols);
+            fread(layer->b->data[0], sizeof(double), rows * cols, file);
         }
     }
 

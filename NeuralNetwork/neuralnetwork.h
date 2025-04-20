@@ -10,15 +10,22 @@ typedef struct {
     unsigned char b;
 } Color;
 
-typedef struct{
-    Matrix* nodes;
-    Matrix* bias;
-    Matrix* weights;
-} Layers;
+typedef struct {
+    Matrix* A;
+    Matrix* b;
+    Matrix* W;
+    Matrix* Z;
+
+    Matrix* dA;
+    Matrix* db;
+    Matrix* dW;
+    Matrix* dZ;
+
+} Layer;
 
 typedef struct {
     int num_layers;
-    Layers* layers;
+    Layer* layers;
 } NeuralNetwork;
 
 NeuralNetwork* neuralNetwork_create(int* layers, int count_layers);
@@ -35,15 +42,17 @@ void forward_prop(NeuralNetwork* network, Matrix* input);
 
 Matrix* onehot(int output_dimension, int index);
 
-void softmax(Matrix* matrix);
+void softmax(const Matrix *in, Matrix *out);
 
-void RELU(double* pointer);
+void softmax_backward(Matrix* dZ, Matrix* A, Matrix* dA);
 
-void RELU_matrix(Matrix* pointer);
+double RELU(double x);
 
-char RELU_der(double pointer);
+void RELU_matrix(Matrix* in, Matrix* out);
 
-Matrix* RELU_der_matrix(Matrix* matrix);
+char RELU_backward(double pointer);
+
+Matrix* RELU_backward_matrix(Matrix* matrix);
 
 int get_max_output_node_index(NeuralNetwork* network);
 
