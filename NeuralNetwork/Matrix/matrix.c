@@ -1,6 +1,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 #include "matrix.h"
 
 Matrix* matrix_create(int row, int col) {
@@ -29,6 +30,25 @@ double matrix_get(Matrix* data, int r, int c) {
 
 void matrix_set(Matrix* data, int r, int c, double v) {
     data->data[r][c] = v;
+}
+
+Matrix* matrix_random(int rows, int cols) {
+    Matrix* m = matrix_create(rows, cols);
+    if (!m) return NULL;
+
+    static int seeded = 0;
+    if (!seeded) {
+        srand((unsigned)time(NULL));
+        seeded = 1;
+    }
+
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            m->data[i][j] = (double)rand() / ((double)RAND_MAX + 1.0);
+        }
+    }
+
+    return m;
 }
 
 Matrix* matrix_T(Matrix* data) {
@@ -166,7 +186,7 @@ Matrix* matrix_column_sum(const Matrix* mat) {
 void matrix_copy(Matrix* m1, Matrix* m2) {
     if(m1 == NULL || m2 == NULL || m1->row != m2->row || m1->col != m2->col) {
         printf("Unable to copy matrix");  
-        return NULL;
+        return;
     }
 
     for (int r = 0; r < m1->row; r++) {

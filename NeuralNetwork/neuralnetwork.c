@@ -6,6 +6,7 @@
 #include "Matrix/matrix.h"
 #include <math.h>
 #include <dirent.h>
+#include <Accelerate/Accelerate.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include "/Users/cristiano/stb_image/stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -15,80 +16,39 @@
 
 double learning_rate = 0.01;
 
-NeuralNetwork* neuralNetwork_create(int* layers, int count_layers) {
-    if (layers == NULL || count_layers <= 0) {
-        printf("Error: Invalid input parameters.\n");
+NeuralNetwork* neuralNetwork_create(int* layer_dims, int count_layers) {
+    // Allocate the network struct
+    NeuralNetwork* net = malloc(sizeof(NeuralNetwork));
+    if (!net) return NULL;
+    net->num_layers = count_layers;
+    // Allocate and zero-initialize the layers array
+    net->layers = calloc(count_layers, sizeof(Layer));
+    if (!net->layers) {
+        free(net);
         return NULL;
     }
 
-    NeuralNetwork* neuralNetwork = (NeuralNetwork*) malloc(sizeof(NeuralNetwork));
-    if (neuralNetwork == NULL) {
-        printf("Error while allocating memory for the network.\n");
-        return NULL;
-    }
-
-    Layer* net_layers = (Layer*) malloc(sizeof(Layer) * count_layers);
-    if (net_layers == NULL) {
-        printf("Error while allocating memory for the layers.\n");
-        free(neuralNetwork);  // Free previously allocated memory
-        return NULL;
-    }
-
-    neuralNetwork->layers = net_layers;
-    neuralNetwork->num_layers = count_layers;
-
-    for (int i = 0; i < count_layers; i++) {
-        net_layers[i].A = matrix_create(layers[i], 1);
-        
-        if (net_layers[i].A == NULL) {
-            printf("Error while allocating memory for A in layer %d.\n", i);
-            // Cleanup allocated memory before returning
-            for (int j = 0; j < i; j++) {
-                matrix_free(net_layers[j].A);
-                if (j > 0) matrix_free(net_layers[j].b);
-                if (j < count_layers - 1) matrix_free(net_layers[j].W);
-            }
-            free(net_layers);
-            free(neuralNetwork);
-            return NULL;
-        }
+    for (int i = 0; i < count_layers; ++i) {
+        Layer* layer = &net->layers[i];
+        layer->A  = NULL;
+        layer->Z  = NULL;
+        layer->dA = NULL;
+        layer->dZ = NULL;
+        layer->dW = NULL;
+        layer->db = NULL;
 
         if (i > 0) {
-            net_layers[i].b = matrix_create(layers[i], 1);
-            if (net_layers[i].b == NULL) {
-                printf("Error while allocating memory for bias in layer %d.\n", i);
-                // Cleanup allocated memory before returning
-                for (int j = 0; j <= i; j++) {
-                    matrix_free(net_layers[j].A);
-                    if (j > 0) matrix_free(net_layers[j].b);
-                    if (j < count_layers - 1) matrix_free(net_layers[j].W);
-                }
-                free(net_layers);
-                free(neuralNetwork);
-                return NULL;
-            }
-        }
-
-        if (i < count_layers - 1) {
-            net_layers[i].W = matrix_create(layers[i + 1], layers[i]);
-            if (net_layers[i].W == NULL) {
-                printf("Error while allocating memory for W in layer %d.\n", i);
-                // Cleanup allocated memory before returning
-                for (int j = 0; j <= i; j++) {
-                    matrix_free(net_layers[j].A);
-                    if (j > 0) matrix_free(net_layers[j].b);
-                    if (j < count_layers - 1) matrix_free(net_layers[j].W);
-                }
-                free(net_layers);
-                free(neuralNetwork);
-                return NULL;
-            }
+            // W: [layer_dims[i] × layer_dims[i-1]]
+            layer->W = matrix_random(layer_dims[i], layer_dims[i-1]);
+            // b: [layer_dims[i] × 1]
+            layer->b = matrix_create(layer_dims[i], 1);
+        } else {
+            layer->W = NULL;
+            layer->b = NULL;
         }
     }
 
-    printf("Network created.\n");
-
-    return neuralNetwork;
+    return net;
 }
 
 void neuralNetwork_train(NeuralNetwork* network, char* dataset_path) {
@@ -109,6 +69,7 @@ void neuralNetwork_train(NeuralNetwork* network, char* dataset_path) {
         for (int i = 0; i < total_data; i++) {
             Matrix* current_data = dataset[i];
 
+            printf("\nforward\n");
             forward_prop(network, current_data);
 
             Matrix* onehot_mtx = onehot(label[i], output_dimension);
@@ -117,6 +78,7 @@ void neuralNetwork_train(NeuralNetwork* network, char* dataset_path) {
             if (matrix_get(onehot_mtx, max_output_index, 0) == 1.0)
                 correct_prediction++;
             
+            printf("\backprop\n");
             back_prop(network, onehot_mtx);
 
             matrix_free(onehot_mtx);

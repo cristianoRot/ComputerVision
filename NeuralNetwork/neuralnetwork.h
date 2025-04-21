@@ -1,8 +1,8 @@
-// NeuralNetwork.h
 #ifndef NEURAL_NETWORK_H
 #define NEURAL_NETWORK_H
 
 #include "Matrix/matrix.h"
+#include <stdlib.h>
 
 typedef struct {
     unsigned char r;
@@ -28,7 +28,8 @@ typedef struct {
     Layer* layers;
 } NeuralNetwork;
 
-NeuralNetwork* neuralNetwork_create(int* layers, int count_layers);
+
+NeuralNetwork* neuralNetwork_create(int* layer_dims, int count_layers);
 
 void neuralNetwork_train(NeuralNetwork* network, char* dataset_path);
 

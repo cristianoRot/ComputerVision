@@ -15,6 +15,8 @@ double matrix_get(Matrix* data, int r, int c);
 
 void matrix_set(Matrix* data, int r, int c, double v);
 
+Matrix* matrix_random(int rows, int cols);
+
 Matrix* matrix_T(Matrix* data);
 
 Matrix* matrix_sub(Matrix* m1, Matrix* m2);
