@@ -146,33 +146,30 @@ void back_prop(NeuralNetwork* network, Matrix* y_true) {
     Layer* layer = &network->layers[last];
     Layer* prevLayer = &network->layers[last - 1];
 
-    // calculate gradient for output layer
+    // --- OUTPUT LAYER ---
 
     // • dA = 2*(A - y_true)
-    Matrix *diff = matrix_sub(layer->A, y_true);
-    Matrix *dA = matrix_scalar_product(diff, 2.0);
-    matrix_free(diff);
-
-    if (layer->dA) matrix_free(layer->dA);
+    Matrix* tmp = matrix_sub(layer->A, y_true);
+    Matrix* dA  = matrix_scalar_product(tmp, 2.0);
+    matrix_free(tmp);
+    matrix_free(layer->dA);
     layer->dA = dA;
 
+    // • dZ = softmax_backward
     softmax_backward(layer->dZ, layer->A, layer->dA);
 
     // • dW = dZ · A_prev^T
-    Matrix *A_T = matrix_T(prevLayer->A);
-    Matrix *dW  = matrix_product(layer->dZ, A_T);
-    matrix_free(A_T);
-
-    if (layer->dW) matrix_free(layer->dW);
+    tmp = matrix_T(prevLayer->A);
+    Matrix *dW  = matrix_product(layer->dZ, tmp);
+    matrix_free(tmp);
+    matrix_free(layer->dW);
     layer->dW = dW;
 
     // • db = dZ
-    if (layer->db) matrix_free(layer->db);
-    layer->db = matrix_new(layer->dZ->row, layer->dZ->col);
-    matrix_copy(layer->dZ, layer->db);
+    matrix_free(layer->db);
+    layer->db = matrix_column_sum(layer->dZ);
 
-
-    // calculate gradient for other layers
+    // --- HIDDEN LAYERS ---
 
     for (int i = last - 1; i > 0; i--)
     {
@@ -181,16 +178,25 @@ void back_prop(NeuralNetwork* network, Matrix* y_true) {
         Layer* nextLayer = &network->layers[i + 1];
 
         // • dA(i) = W_T(i + 1) · dZ(i + 1)
-        Matrix* W_T = matrix_T(nextLayer->W);
-        Matrix* dA = matrix_product(W_T, nextLayer->dZ);
-        matrix_free(W_T);
-        if (layer->dA) matrix_free(layer->dA);
+        tmp = matrix_T(nextLayer->W);
+        Matrix* dA = matrix_product(tmp, nextLayer->dZ);
+        matrix_free(tmp);
+        matrix_free(layer->dA);
         layer->dA = dA;
 
         // • dZ(i) = RELU_back(Z(i)) · dA(i)
         RELU_backward(layer->Z, layer->dA, layer->dZ);
 
-        
+        // • dW = dZ · A_prev^T
+        tmp = matrix_T(prevLayer->A);
+        Matrix *dW  = matrix_product(layer->dZ, tmp);
+        matrix_free(tmp);
+        matrix_free(layer->dW);
+        layer->dW = dW;
+
+        // • db = dZ
+        matrix_free(layer->db);
+        layer->db = matrix_column_sum(layer->dZ);
     }
 }
 

@@ -27,6 +27,8 @@ Matrix* matrix_scalar_product(Matrix* m1, double scalar);
 
 Matrix* matrix_linear_product(Matrix* m1, Matrix* m2);
 
+Matrix* matrix_column_sum(const Matrix* mat);
+
 void matrix_copy(Matrix* m1, Matrix* m2);
 
 void matrix_print(Matrix* data);

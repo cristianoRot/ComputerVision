@@ -145,6 +145,24 @@ Matrix* matrix_linear_product(Matrix* m1, Matrix* m2) {
     return result;
 }
 
+Matrix* matrix_column_sum(const Matrix* mat) {
+    int rows = mat->row;
+    int cols = mat->col;
+
+    Matrix* result = matrix_create(rows, 1);
+    if (!result) return NULL;
+
+    for (int i = 0; i < rows; i++) {
+        double sum = 0.0;
+        for (int j = 0; j < cols; j++) {
+            sum += mat->data[i][j];
+        }
+        result->data[i][0] = sum;
+    }
+
+    return result;
+}
+
 void matrix_copy(Matrix* m1, Matrix* m2) {
     if(m1 == NULL || m2 == NULL || m1->row != m2->row || m1->col != m2->col) {
         printf("Unable to copy matrix");  
