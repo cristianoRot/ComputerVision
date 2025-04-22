@@ -1,4 +1,3 @@
-
 // NeuralNetwork.c
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,7 +16,6 @@
 double learning_rate = 0.01;
 
 NeuralNetwork* neuralNetwork_create(int* layer_dims, int num_layers) {
-    // Allocate the network struct
     NeuralNetwork* net = malloc(sizeof(NeuralNetwork));
     if (!net) return NULL;
     net->num_layers = num_layers;
@@ -33,10 +31,17 @@ NeuralNetwork* neuralNetwork_create(int* layer_dims, int num_layers) {
         int rows = layer_dims[i];
 
         // Always allocate A, Z, dA, dZ as [rows × 1]
-        L->A  = matrix_create(rows, 1);
-        L->Z  = matrix_create(rows, 1);
-        L->dA = matrix_create(rows, 1);
-        L->dZ = matrix_create(rows, 1);
+        if (i > 0) {
+            L->A  = matrix_create(rows, 1); // Will be filled during forward pass
+            L->Z  = matrix_create(rows, 1);
+            L->dA = matrix_create(rows, 1);
+            L->dZ = matrix_create(rows, 1);
+        } else {
+            L->A = NULL; // Will be assigned the input matrix
+            L->Z = NULL;
+            L->dA = NULL;
+            L->dZ = NULL;
+        }
 
         if (i > 0) {
             int prev = layer_dims[i-1];
@@ -56,43 +61,41 @@ NeuralNetwork* neuralNetwork_create(int* layer_dims, int num_layers) {
     return net;
 }
 
-void neuralNetwork_train(NeuralNetwork* network, char* dataset_path, int epochs) {
+void neuralNetwork_train(NeuralNetwork* network, const char* dataset_path, int epochs) {
     printf("Start training...\n");
 
-    Matrix** dataset = NULL;
-    int* label = NULL;
-    int total_data = initialize_dataset(&dataset, &label, dataset_path, 19);
+    Dataset dataset;
+    int total_data = initialize_dataset(&dataset, dataset_path, dataset_path, 19);
 
     int num_layers = network->num_layers;
-    int output_dim = network->layers[num_layers - 1].b->row;
 
     for (int epoch = 1; epoch <= epochs; ++epoch) {
         printf("=== Epoch %d ===\n", epoch);
 
-        int correct_prediction = 0;;
+        int correct_prediction = 0;
         
         for (int i = 0; i < total_data; i++) {
-            Matrix* x = dataset[i];
-            Matrix* y_true = onehot(label[i], output_dim);
+            Matrix* x = dataset.X[i];
+            Matrix* y_true = dataset.Y[i];
 
             forward_prop(network, x);
 
             int max_output_index = get_max_output_node_index(network);
 
-            if (matrix_get(y_true, max_output_index, 0) == 1.0)
+            if (matrix_get(y_true, max_output_index, 0) == 1.0) {
                 correct_prediction++;
+            }
             
             back_prop(network, y_true);
-
-            matrix_free(y_true);
         }
 
         double accuracy = (double)correct_prediction / total_data;
         printf("%d° Epoch: %f of accuracy.\n", epoch, accuracy);
+
+        adjust_learning_rate(epoch);
     }
 
-    free_dataset(dataset, total_data);
-    free(label);
+    free_dataset(&dataset);
 }
 
 int neuralNetwork_predict(NeuralNetwork* network, Matrix* input) {
@@ -115,20 +118,18 @@ void back_prop(NeuralNetwork* network, Matrix* y_true) {
 
     // • dA = 2*(A - y_true)
     Matrix* tmp = matrix_sub(layer->A, y_true);
-    Matrix* dA  = matrix_scalar_product(tmp, 2.0);
-    matrix_free(tmp);
     matrix_free(layer->dA);
-    layer->dA = dA;
+    layer->dA  = matrix_scalar_product(tmp, 2.0);
+    matrix_free(tmp);
 
     // • dZ = softmax_backward
     softmax_backward(layer->dZ, layer->A, layer->dA);
 
     // • dW = dZ · A_prev^T
     tmp = matrix_T(prevLayer->A);
-    Matrix *dW  = matrix_product(layer->dZ, tmp);
-    matrix_free(tmp);
     matrix_free(layer->dW);
-    layer->dW = dW;
+    layer->dW  = matrix_product(layer->dZ, tmp);
+    matrix_free(tmp);
 
     // • db = dZ
     matrix_free(layer->db);
@@ -144,20 +145,18 @@ void back_prop(NeuralNetwork* network, Matrix* y_true) {
 
         // • dA(i) = W_T(i + 1) · dZ(i + 1)
         tmp = matrix_T(nextLayer->W);
-        Matrix* dA = matrix_product(tmp, nextLayer->dZ);
-        matrix_free(tmp);
         matrix_free(layer->dA);
-        layer->dA = dA;
+        layer->dA = matrix_product(tmp, nextLayer->dZ);
+        matrix_free(tmp);
 
         // • dZ(i) = RELU_back(Z(i)) · dA(i)
         RELU_backward(layer->Z, layer->dA, layer->dZ);
 
         // • dW = dZ · A_prev^T
         tmp = matrix_T(prevLayer->A);
-        Matrix *dW  = matrix_product(layer->dZ, tmp);
-        matrix_free(tmp);
         matrix_free(layer->dW);
-        layer->dW = dW;
+        layer->dW  = matrix_product(layer->dZ, tmp);
+        matrix_free(tmp);
 
         // • db = dZ
         matrix_free(layer->db);
@@ -190,15 +189,9 @@ void forward_prop(NeuralNetwork* network, Matrix* input) {
 
         // Z = W · A_prev + b
         Matrix *prod = matrix_product(layer->W, prev_layer->A);
+        matrix_free(layer->Z);
         layer->Z = matrix_sum(prod, layer->b);
         matrix_free(prod);
-
-        int rows = layer->Z->row;
-        int cols = layer->Z->col;
-
-        if (!layer->A) {
-            layer->A = matrix_create(rows, cols);
-        }
 
         if (i < L-1) {
             RELU_matrix(layer->Z, layer->A);
@@ -206,18 +199,6 @@ void forward_prop(NeuralNetwork* network, Matrix* input) {
             softmax(layer->Z, layer->A);
         }
     }
-}
-
-Matrix* onehot(int label, int num_classes) {
-    Matrix* result = matrix_create(num_classes, 1);
-
-    for (int i = 0; i < num_classes; i++) {
-        matrix_set(result, i, 0, 0.0);
-    }
-
-    matrix_set(result, label, 0, 1.0);
-
-    return result;
 }
 
 void softmax(const Matrix *in, Matrix *out) {
@@ -274,7 +255,7 @@ void softmax_backward(Matrix* dZ, Matrix* A, Matrix* dA) {
 }
 
 double RELU(double x) {
-    return x > 0 ? x : 0;
+    return x > 0 ? x : 0.0;
 }
 
 void RELU_matrix(Matrix* matrixIn, Matrix* matrixOut) {
@@ -289,7 +270,7 @@ void RELU_matrix(Matrix* matrixIn, Matrix* matrixOut) {
 }
 
 char RELU_der(double pointer) {
-    return pointer > 0 ? 1 : 0;
+    return pointer > 0 ? 1.0 : 0.0;
 }
 
 void RELU_backward(const Matrix* Z, Matrix* dA, Matrix* dZ) {
@@ -321,110 +302,93 @@ int get_max_output_node_index(NeuralNetwork* network) {
     return index;
 }
 
-int initialize_dataset(Matrix*** dataset, int** label, char* dataset_path, int num_classes) {
+int initialize_dataset(Dataset* dataset, const char* dataset_path, int canvas_size, int num_classes) {
     printf("Initializing dataset...\n");
-    int canvas_size = 64;  // Ridimensionato a 64x64
-    int total_data = 0;
-
-    // Calcola il numero totale di immagini
-    for (int class_index = 0; class_index < num_classes; class_index++) {
+    int total_images = 0;
+    // First pass: count all images
+    for (int class_index = 0; class_index < num_classes; ++class_index) {
         char class_path[256];
         sprintf(class_path, "%s/%d", dataset_path, class_index);
-
         DIR* dir = opendir(class_path);
         if (!dir) {
             perror("Error opening directory");
             exit(EXIT_FAILURE);
         }
-
         struct dirent* entry;
         while ((entry = readdir(dir)) != NULL) {
-            if (entry->d_type == DT_REG) { // Considera solo file regolari
-                total_data++;
+            if (entry->d_type == DT_REG && entry->d_name[0] != '.') {
+                total_images++;
             }
         }
-
         closedir(dir);
     }
-
-    // Allocazione del dataset e della matrice dei label
-    *dataset = (Matrix**)malloc(total_data * sizeof(Matrix*));
-    *label = malloc(sizeof(int) * total_data);  // Etichette uniche per ogni immagine
-
-    if (*dataset == NULL || *label == NULL) {
-        printf("Error allocating memory for dataset or labels.\n");
+    dataset->N = total_images;
+    dataset->X = (Matrix**)malloc(dataset->N * sizeof(Matrix*));
+    dataset->Y = (Matrix**)malloc(dataset->N * sizeof(Matrix*));
+    if (!dataset->X || !dataset->Y) {
+        printf("Error allocating memory for dataset.\n");
         exit(EXIT_FAILURE);
     }
-
-    int image_index = 0;
-
-    // Processa ogni immagine
-    for (int class_index = 0; class_index < num_classes; class_index++) {
+    int img_idx = 0;
+    for (int class_index = 0; class_index < num_classes; ++class_index) {
         char class_path[256];
         sprintf(class_path, "%s/%d", dataset_path, class_index);
-
         DIR* dir = opendir(class_path);
         if (!dir) {
             perror("Error opening directory");
             exit(EXIT_FAILURE);
         }
-
         struct dirent* entry;
         while ((entry = readdir(dir)) != NULL) {
-            if (entry->d_type == DT_REG && entry->d_name[0] != '.') { // Ignora file nascosti
+            if (entry->d_type == DT_REG && entry->d_name[0] != '.') {
                 char image_path[512];
                 sprintf(image_path, "%s/%s", class_path, entry->d_name);
-
                 int width, height, channels;
-                unsigned char* img_data = stbi_load(image_path, &width, &height, &channels, 1); // Scala di grigi
-
+                unsigned char* img_data = stbi_load(image_path, &width, &height, &channels, 1);
                 if (!img_data) {
                     printf("Error loading image: %s\n", image_path);
                     continue;
                 }
-
-                // Ridimensiona l'immagine a 64x64
                 unsigned char* resized_img_data = malloc(canvas_size * canvas_size);
-                if (resized_img_data == NULL) {
+                if (!resized_img_data) {
                     printf("Error allocating memory for resized image.\n");
                     stbi_image_free(img_data);
                     exit(EXIT_FAILURE);
                 }
-
-                stbir_resize_uint8_linear(img_data, width, height, 0, resized_img_data, canvas_size, canvas_size, 0, 1);
-                stbi_image_free(img_data); // Libera l'immagine originale
-
-                // Crea una matrice 64x64
+                stbir_resize_uint8_linear(
+                    img_data, width, height, 0,
+                    resized_img_data, canvas_size, canvas_size, 0, 1
+                );
+                stbi_image_free(img_data);
                 Matrix* image_matrix = matrix_create(canvas_size * canvas_size, 1);
-
-                for (int i = 0; i < canvas_size * canvas_size; i++) {
-                    matrix_set(image_matrix, i, 0, (float)resized_img_data[i] / 255.0);  // Normalizza in [0, 1]
+                for (int i = 0; i < canvas_size * canvas_size; ++i) {
+                    matrix_set(image_matrix, i, 0, (float)resized_img_data[i] / 255.0f);
                 }
-
-                free(resized_img_data); // Libera la memoria dell'immagine ridimensionata
-
-                // Aggiungi l'immagine al dataset
-                (*dataset)[image_index] = image_matrix;
-
-                // Assegna il valore di label corrispondente
-                (*label)[image_index] = class_index;
-
-                image_index++;
+                free(resized_img_data);
+                dataset->X[img_idx] = image_matrix;
+                dataset->Y[img_idx] = onehot(class_index, num_classes);
+                img_idx++;
             }
         }
-
         closedir(dir);
     }
-
-    printf("Dataset initialized with %d images.\n", total_data);
-    return total_data;
+    printf("Dataset initialized with %d images.\n", dataset->N);
+    return dataset->N;
 }
 
-void free_dataset(Matrix** dataset, int total_images) {
-    for (int i = 0; i < total_images; i++) {
-        matrix_free(dataset[i]);
+void free_dataset(Dataset* dataset) {
+    // Free each feature and label matrix
+    for (int i = 0; i < dataset->N; ++i) {
+        matrix_free(dataset->X[i]);
+        matrix_free(dataset->Y[i]);
     }
-    free(dataset);
+    // Free the arrays of pointers
+    free(dataset->X);
+    free(dataset->Y);
+    // Reset fields
+    dataset->X = NULL;
+    dataset->Y = NULL;
+    dataset->N = 0;
 }
 
 void save_model(NeuralNetwork* network, char* filename) {
