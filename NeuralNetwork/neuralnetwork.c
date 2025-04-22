@@ -303,16 +303,24 @@ int get_max_output_node_index(NeuralNetwork* network) {
 }
 
 int initialize_dataset(Dataset* dataset, const char* dataset_path, int canvas_size, int num_classes) {
-    printf("Initializing dataset...\n");
+    printf("Initializing dataset from %s...\n", dataset_path);
     int total_images = 0;
+
+    // Check if dataset pointer is NULL
+    if (!dataset) {
+        fprintf(stderr, "Error: Dataset pointer is NULL in initialize_dataset.\n");
+        exit(EXIT_FAILURE);
+    }
+
     // First pass: count all images
     for (int class_index = 0; class_index < num_classes; ++class_index) {
-        char class_path[256];
+        char class_path[512]; // Increased buffer size
         sprintf(class_path, "%s/%d", dataset_path, class_index);
         DIR* dir = opendir(class_path);
         if (!dir) {
-            perror("Error opening directory");
-            exit(EXIT_FAILURE);
+            // If a class directory doesn't exist, print a warning and continue
+            fprintf(stderr, "Warning: Directory not found: %s\n", class_path);
+            continue;
         }
         struct dirent* entry;
         while ((entry = readdir(dir)) != NULL) {
@@ -322,56 +330,107 @@ int initialize_dataset(Dataset* dataset, const char* dataset_path, int canvas_si
         }
         closedir(dir);
     }
+
     dataset->N = total_images;
+    if (total_images == 0) {
+        printf("No images found in the dataset directories.\n");
+        dataset->X = NULL;
+        dataset->Y = NULL;
+        return 0;
+    }
+
     dataset->X = (Matrix**)malloc(dataset->N * sizeof(Matrix*));
     dataset->Y = (Matrix**)malloc(dataset->N * sizeof(Matrix*));
     if (!dataset->X || !dataset->Y) {
-        printf("Error allocating memory for dataset.\n");
+        perror("Error allocating memory for dataset matrices array");
+        // Free already allocated memory before exiting
+        free(dataset->X);
+        free(dataset->Y);
         exit(EXIT_FAILURE);
     }
+
     int img_idx = 0;
     for (int class_index = 0; class_index < num_classes; ++class_index) {
-        char class_path[256];
+        char class_path[512]; // Increased buffer size
         sprintf(class_path, "%s/%d", dataset_path, class_index);
         DIR* dir = opendir(class_path);
-        if (!dir) {
-            perror("Error opening directory");
-            exit(EXIT_FAILURE);
+         if (!dir) {
+            continue; // Skip if directory doesn't exist (already warned)
         }
         struct dirent* entry;
         while ((entry = readdir(dir)) != NULL) {
             if (entry->d_type == DT_REG && entry->d_name[0] != '.') {
-                char image_path[512];
+                char image_path[1024]; // Increased buffer size
                 sprintf(image_path, "%s/%s", class_path, entry->d_name);
                 int width, height, channels;
                 unsigned char* img_data = stbi_load(image_path, &width, &height, &channels, 1);
                 if (!img_data) {
-                    printf("Error loading image: %s\n", image_path);
-                    continue;
+                    fprintf(stderr, "Error loading image: %s\n", image_path);
+                    continue; // Skip this image and continue with the next
                 }
+
+                // Allocate resized_img_data based on canvas_size
                 unsigned char* resized_img_data = malloc(canvas_size * canvas_size);
                 if (!resized_img_data) {
-                    printf("Error allocating memory for resized image.\n");
+                    perror("Error allocating memory for resized image");
                     stbi_image_free(img_data);
+                    // Consider freeing already allocated dataset matrices here if memory is critical
                     exit(EXIT_FAILURE);
                 }
-                stbir_resize_uint8_linear(
+
+                // Use stbir_resize_uint8_linear correctly
+                int resize_success = stbir_resize_uint8_linear(
                     img_data, width, height, 0,
-                    resized_img_data, canvas_size, canvas_size, 0, 1
+                    resized_img_data, canvas_size, canvas_size, 0, 1 // num_channels should be 1
                 );
-                stbi_image_free(img_data);
-                Matrix* image_matrix = matrix_create(canvas_size * canvas_size, 1);
-                for (int i = 0; i < canvas_size * canvas_size; ++i) {
-                    matrix_set(image_matrix, i, 0, (float)resized_img_data[i] / 255.0f);
+
+                stbi_image_free(img_data); // Free original image data
+
+                if (!resize_success) {
+                     fprintf(stderr, "Error resizing image: %s\n", image_path);
+                     free(resized_img_data);
+                     continue; // Skip this image and continue
                 }
-                free(resized_img_data);
-                dataset->X[img_idx] = image_matrix;
-                dataset->Y[img_idx] = onehot(class_index, num_classes);
-                img_idx++;
+
+                // Create matrix and populate with normalized pixel data
+                Matrix* image_matrix = matrix_create(canvas_size * canvas_size, 1);
+                if (!image_matrix) {
+                     perror("Error creating matrix for image");
+                     free(resized_img_data);
+                     // Consider freeing already allocated dataset matrices here
+                     exit(EXIT_FAILURE);
+                }
+
+                for (int i = 0; i < canvas_size * canvas_size; ++i) {
+                    matrix_set(image_matrix, i, 0, (double)resized_img_data[i] / 255.0); // Use double
+                }
+
+                free(resized_img_data); // Free resized image data
+
+                // Store the matrix and one-hot label in the dataset
+                if (img_idx < dataset->N) {
+                    dataset->X[img_idx] = image_matrix;
+                    dataset->Y[img_idx] = onehot(class_index, num_classes);
+                    img_idx++;
+                } else {
+                     fprintf(stderr, "Error: Image count exceeded allocated dataset size during loading.\n");
+                     matrix_free(image_matrix); // Free the matrix to avoid leak
+                     // Depending on severity, you might exit or just warn
+                }
             }
         }
         closedir(dir);
     }
+
+    // If img_idx is less than total_images, it means some images were skipped due to errors.
+    // You might want to adjust dataset->N or handle this case.
+    if (img_idx < total_images) {
+        fprintf(stderr, "Warning: Loaded only %d images out of a counted %d.\n", img_idx, total_images);
+        // Reallocate dataset->X and dataset->Y if necessary, or adjust dataset->N
+        dataset->N = img_idx; // Adjust N to the actual number of loaded images
+    }
+
+
     printf("Dataset initialized with %d images.\n", dataset->N);
     return dataset->N;
 }
