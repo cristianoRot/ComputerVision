@@ -31,7 +31,7 @@ typedef struct {
 
 NeuralNetwork* neuralNetwork_create(int* layer_dims, int count_layers);
 
-void neuralNetwork_train(NeuralNetwork* network, char* dataset_path);
+void neuralNetwork_train(NeuralNetwork* network, char* dataset_path, int epochs);
 
 int neuralNetwork_predict(NeuralNetwork* network, Matrix* input);
 

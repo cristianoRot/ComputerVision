@@ -12,5 +12,5 @@ int main() {
         return 1;
     }
 
-    neuralNetwork_train(neuralNetwork, "/Users/cristiano/Desktop/ComputerVision/dataset");
+    neuralNetwork_train(neuralNetwork, "/Users/cristiano/Desktop/ComputerVision/dataset", 10);
 }

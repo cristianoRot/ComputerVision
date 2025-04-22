@@ -16,72 +16,75 @@
 
 double learning_rate = 0.01;
 
-NeuralNetwork* neuralNetwork_create(int* layer_dims, int count_layers) {
+NeuralNetwork* neuralNetwork_create(int* layer_dims, int num_layers) {
     // Allocate the network struct
     NeuralNetwork* net = malloc(sizeof(NeuralNetwork));
     if (!net) return NULL;
-    net->num_layers = count_layers;
+    net->num_layers = num_layers;
     // Allocate and zero-initialize the layers array
-    net->layers = calloc(count_layers, sizeof(Layer));
+    net->layers = calloc(num_layers, sizeof(Layer));
     if (!net->layers) {
         free(net);
         return NULL;
     }
 
-    for (int i = 0; i < count_layers; ++i) {
-        Layer* layer = &net->layers[i];
-        layer->A  = NULL;
-        layer->Z  = NULL;
-        layer->dA = NULL;
-        layer->dZ = NULL;
-        layer->dW = NULL;
-        layer->db = NULL;
+    for (int i = 0; i < num_layers; ++i) {
+        Layer* L = &net->layers[i];
+        int rows = layer_dims[i];
+
+        // Always allocate A, Z, dA, dZ as [rows × 1]
+        L->A  = matrix_create(rows, 1);
+        L->Z  = matrix_create(rows, 1);
+        L->dA = matrix_create(rows, 1);
+        L->dZ = matrix_create(rows, 1);
 
         if (i > 0) {
-            // W: [layer_dims[i] × layer_dims[i-1]]
-            layer->W = matrix_random(layer_dims[i], layer_dims[i-1]);
-            // b: [layer_dims[i] × 1]
-            layer->b = matrix_create(layer_dims[i], 1);
+            int prev = layer_dims[i-1];
+            // Weights and their gradient: [rows × prev]
+            L->W  = matrix_random(rows, prev);
+            L->dW = matrix_create(rows, prev);
+            // Bias and its gradient: [rows × 1]
+            L->b  = matrix_create(rows, 1);
+            L->db = matrix_create(rows, 1);
         } else {
-            layer->W = NULL;
-            layer->b = NULL;
+            // Input layer has no params
+            L->W = L->dW = NULL;
+            L->b = L->db = NULL;
         }
     }
 
     return net;
 }
 
-void neuralNetwork_train(NeuralNetwork* network, char* dataset_path) {
+void neuralNetwork_train(NeuralNetwork* network, char* dataset_path, int epochs) {
     printf("Start training...\n");
 
     Matrix** dataset = NULL;
     int* label = NULL;
-
     int total_data = initialize_dataset(&dataset, &label, dataset_path, 19);
-    int output_dimension = network->layers[network->num_layers - 1].A->row;
-    int epoch = 1;
 
-    while (1) {
-        int correct_prediction = 0;
+    int num_layers = network->num_layers;
+    int output_dim = network->layers[num_layers - 1].b->row;
 
-        printf("\n%d° Epoch\n", epoch);
+    for (int epoch = 1; epoch <= epochs; ++epoch) {
+        printf("=== Epoch %d ===\n", epoch);
+
+        int correct_prediction = 0;;
         
         for (int i = 0; i < total_data; i++) {
-            Matrix* current_data = dataset[i];
+            Matrix* x = dataset[i];
+            Matrix* y_true = onehot(label[i], output_dim);
 
-            printf("\nforward\n");
-            forward_prop(network, current_data);
+            forward_prop(network, x);
 
-            Matrix* onehot_mtx = onehot(label[i], output_dimension);
             int max_output_index = get_max_output_node_index(network);
 
-            if (matrix_get(onehot_mtx, max_output_index, 0) == 1.0)
+            if (matrix_get(y_true, max_output_index, 0) == 1.0)
                 correct_prediction++;
             
-            printf("\backprop\n");
-            back_prop(network, onehot_mtx);
+            back_prop(network, y_true);
 
-            matrix_free(onehot_mtx);
+            matrix_free(y_true);
         }
 
         double accuracy = (double)correct_prediction / total_data;
@@ -160,6 +163,20 @@ void back_prop(NeuralNetwork* network, Matrix* y_true) {
         matrix_free(layer->db);
         layer->db = matrix_column_sum(layer->dZ);
     }
+
+    for (int l = 1; l < network->num_layers; ++l) {
+        Layer* layer = &network->layers[l];
+    
+        for (int i = 0; i < layer->W->row; ++i) {
+            for (int j = 0; j < layer->W->col; ++j) {
+                layer->W->data[i][j] -= learning_rate * layer->dW->data[i][j];
+            }
+        }
+    
+        for (int i = 0; i < layer->b->row; ++i) {
+            layer->b->data[i][0] -= learning_rate * layer->db->data[i][0];
+        }
+    }
 }
 
 void forward_prop(NeuralNetwork* network, Matrix* input) {
@@ -175,6 +192,13 @@ void forward_prop(NeuralNetwork* network, Matrix* input) {
         Matrix *prod = matrix_product(layer->W, prev_layer->A);
         layer->Z = matrix_sum(prod, layer->b);
         matrix_free(prod);
+
+        int rows = layer->Z->row;
+        int cols = layer->Z->col;
+
+        if (!layer->A) {
+            layer->A = matrix_create(rows, cols);
+        }
 
         if (i < L-1) {
             RELU_matrix(layer->Z, layer->A);
