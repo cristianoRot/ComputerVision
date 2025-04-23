@@ -422,7 +422,6 @@ void save_model(NeuralNetwork* network, const char* filename) {
     }
 
     fclose(file);
-    printf("Model saved successfully to %s\n", filename);
 }
 
 void load_model(NeuralNetwork* network, const char* filename) {
