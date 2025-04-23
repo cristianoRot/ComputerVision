@@ -111,7 +111,7 @@ void neuralNetwork_train(NeuralNetwork* network, Dataset* dataset, const char* m
         adjust_learning_rate(epoch);
     }
 
-    free_dataset(&dataset);
+    free_dataset(dataset);
 }
 
 int neuralNetwork_predict(NeuralNetwork* network, Matrix* input) {
@@ -282,26 +282,6 @@ void softmax(const Matrix *in, Matrix *out) {
     }
 }
 
-void softmax_backward(Matrix* dZ, Matrix* A, Matrix* dA) {
-    int C = A->row;
-    int M = A->col;
-
-    for (int j = 0; j < M; ++j) {
-        for (int i = 0; i < C; ++i) {
-            double sum = 0.0;
-            for (int k = 0; k < C; ++k) {
-                double ai = A->data[i][j];
-                double ak = A->data[k][j];
-                double jac = (i == k)
-                             ? ai * (1.0 - ai)
-                             : -ai * ak;
-                sum += jac * dA->data[k][j];
-            }
-            dZ->data[i][j] = sum;
-        }
-    }
-}
-
 double RELU(double x) {
     return x > 0 ? x : 0.0;
 }
@@ -317,7 +297,7 @@ void RELU_matrix(Matrix* matrixIn, Matrix* matrixOut) {
     }
 }
 
-char RELU_der(double pointer) {
+double RELU_der(double pointer) {
     return pointer > 0 ? 1.0 : 0.0;
 }
 
@@ -373,59 +353,76 @@ void save_model(NeuralNetwork* network, const char* filename) {
         return;
     }
 
-    // Write array of layer dimensions
     int* dims = malloc(num_layers * sizeof(int));
     if (!dims) {
         perror("Error allocating dims array");
         fclose(file);
         return;
     }
-    // Input layer dimension: get from first layer's A or W
+
     if (network->layers[0].A) {
         dims[0] = network->layers[0].A->row;
     } else if (network->layers[1].W) {
-        dims[0] = network->layers[1].W->col;
+         dims[0] = network->layers[1].W->col;
     } else {
+        fprintf(stderr, "Warning: Could not determine input layer dimension for saving.\n");
         dims[0] = 0;
     }
+
     for (int i = 1; i < num_layers; ++i) {
         if (network->layers[i].W)
-            dims[i] = network->layers[i].W->row;
+             dims[i] = network->layers[i].W->row;
+        else if (network->layers[i].b)
+             dims[i] = network->layers[i].b->row;
         else if (network->layers[i].A)
-            dims[i] = network->layers[i].A->row;
-        else
+             dims[i] = network->layers[i].A->row;
+        else {
+            fprintf(stderr, "Warning: Could not determine dimension for layer %d for saving.\n", i);
             dims[i] = 0;
+        }
     }
+
     if (fwrite(dims, sizeof(int), num_layers, file) != (size_t)num_layers) {
         perror("Error writing layer dims");
         free(dims);
         fclose(file);
         return;
     }
+    free(dims);
 
-    // For each layer i=1..num_layers-1, write W and b
+    // Write learning rate
+    if (fwrite(&learning_rate, sizeof(double), 1, file) != 1) {
+        perror("Error writing learning rate");
+        fclose(file);
+        return;
+    }
+
     for (int i = 1; i < num_layers; ++i) {
         Layer* L = &network->layers[i];
-        // Write weights matrix (rows*cols doubles, row-major)
-        int rows = L->W->row, cols = L->W->col;
-        for (int r = 0; r < rows; ++r) {
-            if (fwrite(L->W->data[r], sizeof(double), cols, file) != (size_t)cols) {
+
+        int rows_w = L->W->row;
+        int cols_w = L->W->col;
+        int rows_b = L->b->row;
+
+        for (int r = 0; r < rows_w; ++r) {
+            if (fwrite(L->W->data[r], sizeof(double), cols_w, file) != (size_t)cols_w) {
                 perror("Error writing weight data");
-                free(dims);
                 fclose(file);
-                return;
+                return; // Exit on error
             }
         }
-        // Write bias vector (rows doubles)
-        if (fwrite(L->b->data[0], sizeof(double), rows, file) != (size_t)rows) {
-            perror("Error writing bias data");
-            free(dims);
-            fclose(file);
-            return;
+
+        for (int r = 0; r < rows_b; ++r) {
+             if (fwrite(&L->b->data[r][0], sizeof(double), 1, file) != 1) {
+                perror("Error writing bias data element");
+                fclose(file);
+                return; // Exit on error
+             }
         }
     }
-    free(dims);
+
     fclose(file);
+    printf("Model saved successfully to %s\n", filename);
 }
 
 void load_model(NeuralNetwork* network, const char* filename) {
@@ -438,7 +435,7 @@ void load_model(NeuralNetwork* network, const char* filename) {
     // Read and check magic
     char magic[4];
     if (fread(magic, 1, 4, file) != 4 || magic[0] != 'N' || magic[1] != 'N' || magic[2] != '0' || magic[3] != '1') {
-        fprintf(stderr, "Model file has invalid magic header\n");
+        fprintf(stderr, "Model file %s has invalid magic header or is not a model file\n", filename);
         fclose(file);
         return;
     }
@@ -454,7 +451,7 @@ void load_model(NeuralNetwork* network, const char* filename) {
     // Read dims array
     int* dims = malloc(num_layers * sizeof(int));
     if (!dims) {
-        perror("Error allocating dims array");
+        perror("Error allocating dims array for loading");
         fclose(file);
         return;
     }
@@ -465,26 +462,38 @@ void load_model(NeuralNetwork* network, const char* filename) {
         return;
     }
 
-    // Free existing layers
+    // load learning rate
+    if (fread(&learning_rate, sizeof(double), 1, file) != 1) {
+        perror("Error reading learning rate");
+        free(dims);
+        fclose(file);
+        return;
+    }
+
     if (network->layers) {
         for (int i = 0; i < network->num_layers; ++i) {
             Layer* L = &network->layers[i];
-            if (L->A) matrix_free(L->A);
-            if (L->Z) matrix_free(L->Z);
-            if (L->dA) matrix_free(L->dA);
-            if (L->dZ) matrix_free(L->dZ);
-            if (L->W) matrix_free(L->W);
-            if (L->dW) matrix_free(L->dW);
-            if (L->b) matrix_free(L->b);
-            if (L->db) matrix_free(L->db);
+
+            if (i > 0) { // For hidden and output layers
+                if (L->A) matrix_free(L->A); L->A = NULL;
+                if (L->Z) matrix_free(L->Z); L->Z = NULL;
+                if (L->dA) matrix_free(L->dA); L->dA = NULL;
+                if (L->dZ) matrix_free(L->dZ); L->dZ = NULL;
+            }
+
+            if (L->W) matrix_free(L->W); L->W = NULL;
+            if (L->dW) matrix_free(L->dW); L->dW = NULL;
+            if (L->b) matrix_free(L->b); L->b = NULL;
+            if (L->db) matrix_free(L->db); L->db = NULL;
         }
         free(network->layers);
+        network->layers = NULL;
     }
 
     network->num_layers = num_layers;
     network->layers = calloc(num_layers, sizeof(Layer));
     if (!network->layers) {
-        perror("Error allocating layers array");
+        perror("Error allocating layers array for loading");
         free(dims);
         fclose(file);
         return;
@@ -492,50 +501,80 @@ void load_model(NeuralNetwork* network, const char* filename) {
 
     for (int i = 0; i < num_layers; ++i) {
         Layer* L = &network->layers[i];
-        int rows = dims[i];
+        int rows = dims[i]; // Number of neurons in this layer
+        int prev_rows = (i > 0) ? dims[i-1] : 0; // Number of neurons in previous layer
+
         if (i > 0) {
-            L->A  = matrix_create(rows, 1);
-            L->Z  = matrix_create(rows, 1);
-            L->dA = matrix_create(rows, 1);
-            L->dZ = matrix_create(rows, 1);
-        } else {
-            L->A = NULL;
-            L->Z = NULL;
-            L->dA = NULL;
-            L->dZ = NULL;
+            L->A  = matrix_create(rows, 1); if (!L->A) goto load_error;
+            L->Z  = matrix_create(rows, 1); if (!L->Z) goto load_error;
+            L->dA = matrix_create(rows, 1); if (!L->dA) goto load_error;
+            L->dZ = matrix_create(rows, 1); if (!L->dZ) goto load_error;
+        } 
+        else {
+            L->A = L->Z = L->dA = L->dZ = NULL;
         }
+
         if (i > 0) {
-            int prev = dims[i-1];
-            L->W  = matrix_create(rows, prev);
-            L->dW = matrix_create(rows, prev);
-            L->b  = matrix_create(rows, 1);
-            L->db = matrix_create(rows, 1);
-        } else {
-            L->W = L->dW = NULL;
-            L->b = L->db = NULL;
+            L->W  = matrix_create(rows, prev_rows); if (!L->W) goto load_error; // [rows x prev_rows]
+            L->dW = matrix_create(rows, prev_rows); if (!L->dW) goto load_error;
+            L->b  = matrix_create(rows, 1); if (!L->b) goto load_error;          // [rows x 1]
+            L->db = matrix_create(rows, 1); if (!L->db) goto load_error;
+        } 
+        else {
+            L->W = L->dW = L->b = L->db = NULL;
         }
     }
 
     // For each layer i=1..num_layers-1, read W and b
     for (int i = 1; i < num_layers; ++i) {
         Layer* L = &network->layers[i];
-        int rows = L->W->row, cols = L->W->col;
-        for (int r = 0; r < rows; ++r) {
-            if (fread(L->W->data[r], sizeof(double), cols, file) != (size_t)cols) {
+        int rows_w = L->W->row;
+        int cols_w = L->W->col;
+        int rows_b = L->b->row;
+
+        for (int r = 0; r < rows_w; ++r) {
+            if (fread(L->W->data[r], sizeof(double), cols_w, file) != (size_t)cols_w) {
                 perror("Error reading weight data");
-                free(dims);
-                fclose(file);
-                return;
+                goto load_error; // Jump to cleanup on error
             }
         }
-        if (fread(L->b->data[0], sizeof(double), rows, file) != (size_t)rows) {
-            perror("Error reading bias data");
-            free(dims);
-            fclose(file);
-            return;
+
+        for (int r = 0; r < rows_b; ++r) {
+             if (fread(&L->b->data[r][0], sizeof(double), 1, file) != 1) {
+                perror("Error reading bias data element");
+                goto load_error; // Jump to cleanup on error
+             }
         }
     }
+
     free(dims);
     fclose(file);
-}
+    return;
 
+load_error:
+    perror("Error during model loading");
+
+    if (network->layers) {
+        for (int i = 0; i < num_layers; ++i) 
+        {
+            Layer* L = &network->layers[i];
+
+            if (i > 0) {
+                if (L->A) matrix_free(L->A); L->A = NULL;
+                if (L->Z) matrix_free(L->Z); L->Z = NULL;
+                if (L->dA) matrix_free(L->dA); L->dA = NULL;
+                if (L->dZ) matrix_free(L->dZ); L->dZ = NULL;
+            }
+            if (L->W) matrix_free(L->W); L->W = NULL;
+            if (L->dW) matrix_free(L->dW); L->dW = NULL;
+            if (L->b) matrix_free(L->b); L->b = NULL;
+            if (L->db) matrix_free(L->db); L->db = NULL;
+        }
+
+        free(network->layers);
+        network->layers = NULL;
+    }
+
+    if (dims) free(dims);
+    if (file) fclose(file);
+}

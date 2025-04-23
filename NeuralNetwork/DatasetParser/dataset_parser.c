@@ -18,7 +18,7 @@ int load_image_folder(Dataset* ds, const char* root_path, int canvas_size, int n
     int total = 0;
     char path[1024];
     for (int c = 0; c < num_classes; ++c) {
-        snprintf(path, sizeof(path), "%s/class_%d", root_path, c);
+        snprintf(path, sizeof(path), "%s/%d", root_path, c);
         DIR* d = opendir(path);
         if (!d) return -1;
         struct dirent* ent;
@@ -40,7 +40,7 @@ int load_image_folder(Dataset* ds, const char* root_path, int canvas_size, int n
     // load images and labels
     int idx = 0;
     for (int c = 0; c < num_classes; ++c) {
-        snprintf(path, sizeof(path), "%s/class_%d", root_path, c);
+        snprintf(path, sizeof(path), "%s/%d", root_path, c);
         DIR* d = opendir(path);
         if (!d) break;
         struct dirent* ent;
@@ -52,13 +52,27 @@ int load_image_folder(Dataset* ds, const char* root_path, int canvas_size, int n
             if (stat(file, &st) != 0 || !S_ISREG(st.st_mode)) continue;
 
             int w, h, channels;
-            unsigned char* data = stbi_load(file, &w, &h, &channels, 1);
+            unsigned char* data = stbi_load(file, &w, &h, &channels, 0); // load original channels
             if (!data) continue;
 
-            unsigned char* resized = malloc(canvas_size * canvas_size);
-            stbir_resize_uint8_linear(data, w, h, 0,
-                                      resized, canvas_size, canvas_size, 0, 1);
+            unsigned char* gray_orig = malloc(w * h);
+            if (!gray_orig) {
+                stbi_image_free(data);
+                continue;
+            }
+            for (int i = 0; i < w * h; ++i) {
+                int sum = 0;
+                for (int ch = 0; ch < channels; ++ch) {
+                    sum += data[i * channels + ch];
+                }
+                gray_orig[i] = (unsigned char)(sum / channels);
+            }
             stbi_image_free(data);
+
+            unsigned char* resized = malloc(canvas_size * canvas_size);
+            stbir_resize_uint8_linear(gray_orig, w, h, 0,
+                                      resized, canvas_size, canvas_size, 0, 1);
+            free(gray_orig);
 
             Matrix* img = matrix_create(canvas_size * canvas_size, 1);
             for (int i = 0; i < canvas_size * canvas_size; ++i) {

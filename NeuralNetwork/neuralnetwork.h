@@ -46,13 +46,11 @@ Matrix* onehot(int label, int num_classes);
 
 void softmax(const Matrix *in, Matrix *out);
 
-void softmax_backward(Matrix* dZ, Matrix* A, Matrix* dA);
-
 double RELU(double x);
 
 void RELU_matrix(Matrix* in, Matrix* out);
 
-char RELU_der(double pointer);
+double RELU_der(double pointer);
 
 void RELU_backward(const Matrix* Z, Matrix* dA, Matrix* dZ);
 

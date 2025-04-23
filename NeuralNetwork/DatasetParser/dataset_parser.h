@@ -1,7 +1,7 @@
 #ifndef DATASET_PARSER_H
 #define DATASET_PARSER_H
 
-#include "Matrix/matrix.h"
+#include "../Matrix/matrix.h"
 
 typedef struct {
     Matrix** X;

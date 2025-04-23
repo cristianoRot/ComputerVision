@@ -1,13 +1,23 @@
 // main.c
 #include <stdio.h>
 #include "NeuralNetwork/neuralnetwork.h"
-#include "DatasetParser/dataset_parser.h"
+#include "NeuralNetwork/DatasetParser/dataset_parser.h"
 
 int main() {
 
-    Dataset* dataset;
+    Dataset dataset;
 
-    dataset_parse(dataset);
+    printf("Reading dataset...\n");
+
+    int total_data = load_image_folder(&dataset, "/Users/cristiano/Desktop/ComputerVision/dataset", 28, 19);
+
+    if (total_data == -1) {
+        printf("Error loading dataset.\n");
+        return 1;
+    }
+    else {
+        printf("Dataset loaded with %d images.\n", total_data);
+    }
 
     int layers[5] = { 784, 64, 128, 32, 19 };
     NeuralNetwork* neuralNetwork = neuralNetwork_create(layers, 5);
@@ -19,7 +29,7 @@ int main() {
 
     neuralNetwork_train(
         neuralNetwork, 
-        dataset,
+        &dataset,
         "/Users/cristiano/Desktop/ComputerVision/model",
         19,
         10
