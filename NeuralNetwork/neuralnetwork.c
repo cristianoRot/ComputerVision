@@ -1,18 +1,15 @@
 // NeuralNetwork.c
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
+#include <unistd.h>
 #include "neuralnetwork.h" 
 #include "Matrix/matrix.h"
 #include <math.h>
 #include <dirent.h>
 #include <Accelerate/Accelerate.h>
-#define STB_IMAGE_IMPLEMENTATION
-#include "/Users/cristiano/stb_image/stb_image.h"
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "/Users/cristiano/stb_image/stb_image_write.h"
-#define STB_IMAGE_RESIZE_IMPLEMENTATION
-#include "/Users/cristiano/stb_image/stb_image_resize2.h"
 
+const char* model_path;
 double learning_rate = 0.01;
 
 NeuralNetwork* neuralNetwork_create(int* layer_dims, int num_layers) {
@@ -61,22 +58,34 @@ NeuralNetwork* neuralNetwork_create(int* layer_dims, int num_layers) {
     return net;
 }
 
-void neuralNetwork_train(NeuralNetwork* network, const char* dataset_path, int epochs) {
+void neuralNetwork_train(NeuralNetwork* network, Dataset* dataset, const char* model_path_, int num_classes, int epochs) {
     printf("Start training...\n");
 
-    Dataset dataset;
-    int total_data = initialize_dataset(&dataset, dataset_path, dataset_path, 19);
+    model_path = model_path_;
+
+    // Load model if exists
+    if (access(model_path, F_OK) == 0) {
+        load_model(network, model_path);
+        printf("Loaded existing model from %s\n", model_path);
+    }
 
     int num_layers = network->num_layers;
+    double lastAccuracy = 0.0;
+
+    // Seed the random number generator once
+    srand((unsigned)time(NULL));
 
     for (int epoch = 1; epoch <= epochs; ++epoch) {
         printf("=== Epoch %d ===\n", epoch);
 
         int correct_prediction = 0;
-        
-        for (int i = 0; i < total_data; i++) {
-            Matrix* x = dataset.X[i];
-            Matrix* y_true = dataset.Y[i];
+
+        int* indices = FisherYates_shuffle(dataset->N);
+
+        for (int k = 0; k < dataset->N; ++k) {
+            int i = indices[k];
+            Matrix* x = dataset->X[i];
+            Matrix* y_true = dataset->Y[i];
 
             forward_prop(network, x);
 
@@ -88,9 +97,16 @@ void neuralNetwork_train(NeuralNetwork* network, const char* dataset_path, int e
             
             back_prop(network, y_true);
         }
+        free(indices);
 
-        double accuracy = (double)correct_prediction / total_data;
-        printf("%d° Epoch: %f of accuracy.\n", epoch, accuracy);
+        double accuracy = (double)correct_prediction / dataset->N;
+
+        if (accuracy > lastAccuracy) {
+            save_model(network, model_path);
+            lastAccuracy = accuracy;
+        }
+
+        printf("Epoch %d accuracy: %.2f%%\n", epoch, accuracy * 100.0);
 
         adjust_learning_rate(epoch);
     }
@@ -101,6 +117,23 @@ void neuralNetwork_train(NeuralNetwork* network, const char* dataset_path, int e
 int neuralNetwork_predict(NeuralNetwork* network, Matrix* input) {
     forward_prop(network, input);
     return get_max_output_node_index(network);
+}
+
+int* FisherYates_shuffle(int size) {
+    int *indices = malloc(size * sizeof(int));
+
+    for (int i = 0; i < size; ++i) {
+        indices[i] = i;
+    }
+
+    for (int i = size - 1; i > 0; --i) {
+        int j = rand() % (i + 1);
+        int tmp = indices[i];
+        indices[i] = indices[j];
+        indices[j] = tmp;
+    }
+
+    return indices;
 }
 
 void adjust_learning_rate(int epoch) {
@@ -116,17 +149,12 @@ void back_prop(NeuralNetwork* network, Matrix* y_true) {
 
     // --- OUTPUT LAYER ---
 
-    // • dA = 2*(A - y_true)
-    Matrix* tmp = matrix_sub(layer->A, y_true);
-    matrix_free(layer->dA);
-    layer->dA  = matrix_scalar_product(tmp, 2.0);
-    matrix_free(tmp);
-
-    // • dZ = softmax_backward
-    softmax_backward(layer->dZ, layer->A, layer->dA);
+    // Cross‑entropy loss backward (softmax + CE): dZ = A - y_true
+    matrix_free(layer->dZ);
+    layer->dZ = matrix_sub(layer->A, y_true);
 
     // • dW = dZ · A_prev^T
-    tmp = matrix_T(prevLayer->A);
+    Matrix* tmp = matrix_T(prevLayer->A);
     matrix_free(layer->dW);
     layer->dW  = matrix_product(layer->dZ, tmp);
     matrix_free(tmp);
@@ -199,6 +227,26 @@ void forward_prop(NeuralNetwork* network, Matrix* input) {
             softmax(layer->Z, layer->A);
         }
     }
+}
+
+Matrix* onehot(int label, int num_classes) {
+    Matrix* result = matrix_create(num_classes, 1);
+    if (!result) {
+        perror("Error creating one-hot matrix");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < num_classes; i++) {
+        matrix_set(result, i, 0, 0.0);
+    }
+
+    if (label >= 0 && label < num_classes) {
+        matrix_set(result, label, 0, 1.0);
+    } else {
+        fprintf(stderr, "Warning: Label %d is out of bounds for %d classes.\n", label, num_classes);
+    }
+
+    return result;
 }
 
 void softmax(const Matrix *in, Matrix *out) {
@@ -302,227 +350,192 @@ int get_max_output_node_index(NeuralNetwork* network) {
     return index;
 }
 
-int initialize_dataset(Dataset* dataset, const char* dataset_path, int canvas_size, int num_classes) {
-    printf("Initializing dataset from %s...\n", dataset_path);
-    int total_images = 0;
-
-    // Check if dataset pointer is NULL
-    if (!dataset) {
-        fprintf(stderr, "Error: Dataset pointer is NULL in initialize_dataset.\n");
-        exit(EXIT_FAILURE);
-    }
-
-    // First pass: count all images
-    for (int class_index = 0; class_index < num_classes; ++class_index) {
-        char class_path[512]; // Increased buffer size
-        sprintf(class_path, "%s/%d", dataset_path, class_index);
-        DIR* dir = opendir(class_path);
-        if (!dir) {
-            // If a class directory doesn't exist, print a warning and continue
-            fprintf(stderr, "Warning: Directory not found: %s\n", class_path);
-            continue;
-        }
-        struct dirent* entry;
-        while ((entry = readdir(dir)) != NULL) {
-            if (entry->d_type == DT_REG && entry->d_name[0] != '.') {
-                total_images++;
-            }
-        }
-        closedir(dir);
-    }
-
-    dataset->N = total_images;
-    if (total_images == 0) {
-        printf("No images found in the dataset directories.\n");
-        dataset->X = NULL;
-        dataset->Y = NULL;
-        return 0;
-    }
-
-    dataset->X = (Matrix**)malloc(dataset->N * sizeof(Matrix*));
-    dataset->Y = (Matrix**)malloc(dataset->N * sizeof(Matrix*));
-    if (!dataset->X || !dataset->Y) {
-        perror("Error allocating memory for dataset matrices array");
-        // Free already allocated memory before exiting
-        free(dataset->X);
-        free(dataset->Y);
-        exit(EXIT_FAILURE);
-    }
-
-    int img_idx = 0;
-    for (int class_index = 0; class_index < num_classes; ++class_index) {
-        char class_path[512]; // Increased buffer size
-        sprintf(class_path, "%s/%d", dataset_path, class_index);
-        DIR* dir = opendir(class_path);
-         if (!dir) {
-            continue; // Skip if directory doesn't exist (already warned)
-        }
-        struct dirent* entry;
-        while ((entry = readdir(dir)) != NULL) {
-            if (entry->d_type == DT_REG && entry->d_name[0] != '.') {
-                char image_path[1024]; // Increased buffer size
-                sprintf(image_path, "%s/%s", class_path, entry->d_name);
-                int width, height, channels;
-                unsigned char* img_data = stbi_load(image_path, &width, &height, &channels, 1);
-                if (!img_data) {
-                    fprintf(stderr, "Error loading image: %s\n", image_path);
-                    continue; // Skip this image and continue with the next
-                }
-
-                // Allocate resized_img_data based on canvas_size
-                unsigned char* resized_img_data = malloc(canvas_size * canvas_size);
-                if (!resized_img_data) {
-                    perror("Error allocating memory for resized image");
-                    stbi_image_free(img_data);
-                    // Consider freeing already allocated dataset matrices here if memory is critical
-                    exit(EXIT_FAILURE);
-                }
-
-                // Use stbir_resize_uint8_linear correctly
-                int resize_success = stbir_resize_uint8_linear(
-                    img_data, width, height, 0,
-                    resized_img_data, canvas_size, canvas_size, 0, 1 // num_channels should be 1
-                );
-
-                stbi_image_free(img_data); // Free original image data
-
-                if (!resize_success) {
-                     fprintf(stderr, "Error resizing image: %s\n", image_path);
-                     free(resized_img_data);
-                     continue; // Skip this image and continue
-                }
-
-                // Create matrix and populate with normalized pixel data
-                Matrix* image_matrix = matrix_create(canvas_size * canvas_size, 1);
-                if (!image_matrix) {
-                     perror("Error creating matrix for image");
-                     free(resized_img_data);
-                     // Consider freeing already allocated dataset matrices here
-                     exit(EXIT_FAILURE);
-                }
-
-                for (int i = 0; i < canvas_size * canvas_size; ++i) {
-                    matrix_set(image_matrix, i, 0, (double)resized_img_data[i] / 255.0); // Use double
-                }
-
-                free(resized_img_data); // Free resized image data
-
-                // Store the matrix and one-hot label in the dataset
-                if (img_idx < dataset->N) {
-                    dataset->X[img_idx] = image_matrix;
-                    dataset->Y[img_idx] = onehot(class_index, num_classes);
-                    img_idx++;
-                } else {
-                     fprintf(stderr, "Error: Image count exceeded allocated dataset size during loading.\n");
-                     matrix_free(image_matrix); // Free the matrix to avoid leak
-                     // Depending on severity, you might exit or just warn
-                }
-            }
-        }
-        closedir(dir);
-    }
-
-    // If img_idx is less than total_images, it means some images were skipped due to errors.
-    // You might want to adjust dataset->N or handle this case.
-    if (img_idx < total_images) {
-        fprintf(stderr, "Warning: Loaded only %d images out of a counted %d.\n", img_idx, total_images);
-        // Reallocate dataset->X and dataset->Y if necessary, or adjust dataset->N
-        dataset->N = img_idx; // Adjust N to the actual number of loaded images
-    }
-
-
-    printf("Dataset initialized with %d images.\n", dataset->N);
-    return dataset->N;
-}
-
-void free_dataset(Dataset* dataset) {
-    // Free each feature and label matrix
-    for (int i = 0; i < dataset->N; ++i) {
-        matrix_free(dataset->X[i]);
-        matrix_free(dataset->Y[i]);
-    }
-    // Free the arrays of pointers
-    free(dataset->X);
-    free(dataset->Y);
-    // Reset fields
-    dataset->X = NULL;
-    dataset->Y = NULL;
-    dataset->N = 0;
-}
-
-void save_model(NeuralNetwork* network, char* filename) {
+void save_model(NeuralNetwork* network, const char* filename) {
     FILE* file = fopen(filename, "wb");
-    if (file == NULL) {
+    if (!file) {
         perror("Error opening file for saving model");
         return;
     }
 
-    fwrite(&(network->num_layers), sizeof(int), 1, file);
-
-    for (int i = 0; i < network->num_layers; i++) {
-        Layer layer = network->layers[i];
-
-        int rows = layer.A->row;
-        int cols = layer.A->col;
-        fwrite(&rows, sizeof(int), 1, file);
-        fwrite(&cols, sizeof(int), 1, file);
-
-        if (layer.W != NULL) {
-            fwrite(&(layer.W->row), sizeof(int), 1, file);
-            fwrite(&(layer.W->col), sizeof(int), 1, file);
-            for (int r = 0; r < layer.W->row; r++) {
-                fwrite(layer.W->data[r], sizeof(double), layer.W->col, file);
-            }
-        }
-
-        if (layer.b != NULL) {
-            fwrite(&(layer.b->row), sizeof(int), 1, file);
-            fwrite(&(layer.b->col), sizeof(int), 1, file);
-            fwrite(layer.b->data[0], sizeof(double), layer.b->row * layer.b->col, file);
-        }
+    // Write magic number
+    const char magic[4] = {'N','N','0','1'};
+    if (fwrite(magic, 1, 4, file) != 4) {
+        perror("Error writing model magic");
+        fclose(file);
+        return;
     }
 
+    // Write number of layers
+    int num_layers = network->num_layers;
+    if (fwrite(&num_layers, sizeof(int), 1, file) != 1) {
+        perror("Error writing num_layers");
+        fclose(file);
+        return;
+    }
+
+    // Write array of layer dimensions
+    int* dims = malloc(num_layers * sizeof(int));
+    if (!dims) {
+        perror("Error allocating dims array");
+        fclose(file);
+        return;
+    }
+    // Input layer dimension: get from first layer's A or W
+    if (network->layers[0].A) {
+        dims[0] = network->layers[0].A->row;
+    } else if (network->layers[1].W) {
+        dims[0] = network->layers[1].W->col;
+    } else {
+        dims[0] = 0;
+    }
+    for (int i = 1; i < num_layers; ++i) {
+        if (network->layers[i].W)
+            dims[i] = network->layers[i].W->row;
+        else if (network->layers[i].A)
+            dims[i] = network->layers[i].A->row;
+        else
+            dims[i] = 0;
+    }
+    if (fwrite(dims, sizeof(int), num_layers, file) != (size_t)num_layers) {
+        perror("Error writing layer dims");
+        free(dims);
+        fclose(file);
+        return;
+    }
+
+    // For each layer i=1..num_layers-1, write W and b
+    for (int i = 1; i < num_layers; ++i) {
+        Layer* L = &network->layers[i];
+        // Write weights matrix (rows*cols doubles, row-major)
+        int rows = L->W->row, cols = L->W->col;
+        for (int r = 0; r < rows; ++r) {
+            if (fwrite(L->W->data[r], sizeof(double), cols, file) != (size_t)cols) {
+                perror("Error writing weight data");
+                free(dims);
+                fclose(file);
+                return;
+            }
+        }
+        // Write bias vector (rows doubles)
+        if (fwrite(L->b->data[0], sizeof(double), rows, file) != (size_t)rows) {
+            perror("Error writing bias data");
+            free(dims);
+            fclose(file);
+            return;
+        }
+    }
+    free(dims);
     fclose(file);
 }
 
-NeuralNetwork* load_model(const char* filename) {
+void load_model(NeuralNetwork* network, const char* filename) {
     FILE* file = fopen(filename, "rb");
-    if (file == NULL) {
-        perror("Error opening file for loading model.\n");
-        return NULL;
+    if (!file) {
+        perror("Error opening file for loading model");
+        return;
     }
 
-    NeuralNetwork* network = malloc(sizeof(NeuralNetwork));
-    fread(&(network->num_layers), sizeof(int), 1, file);
+    // Read and check magic
+    char magic[4];
+    if (fread(magic, 1, 4, file) != 4 || magic[0] != 'N' || magic[1] != 'N' || magic[2] != '0' || magic[3] != '1') {
+        fprintf(stderr, "Model file has invalid magic header\n");
+        fclose(file);
+        return;
+    }
 
-    network->layers = malloc(sizeof(Layer) * network->num_layers);
+    // Read number of layers
+    int num_layers;
+    if (fread(&num_layers, sizeof(int), 1, file) != 1) {
+        perror("Error reading num_layers");
+        fclose(file);
+        return;
+    }
 
-    for (int i = 0; i < network->num_layers; i++) {
-        Layer* layer = &(network->layers[i]);
+    // Read dims array
+    int* dims = malloc(num_layers * sizeof(int));
+    if (!dims) {
+        perror("Error allocating dims array");
+        fclose(file);
+        return;
+    }
+    if (fread(dims, sizeof(int), num_layers, file) != (size_t)num_layers) {
+        perror("Error reading layer dims");
+        free(dims);
+        fclose(file);
+        return;
+    }
 
-        int rows, cols;
-        fread(&rows, sizeof(int), 1, file);
-        fread(&cols, sizeof(int), 1, file);
-        layer->A = matrix_create(rows, cols);
+    // Free existing layers
+    if (network->layers) {
+        for (int i = 0; i < network->num_layers; ++i) {
+            Layer* L = &network->layers[i];
+            if (L->A) matrix_free(L->A);
+            if (L->Z) matrix_free(L->Z);
+            if (L->dA) matrix_free(L->dA);
+            if (L->dZ) matrix_free(L->dZ);
+            if (L->W) matrix_free(L->W);
+            if (L->dW) matrix_free(L->dW);
+            if (L->b) matrix_free(L->b);
+            if (L->db) matrix_free(L->db);
+        }
+        free(network->layers);
+    }
 
-        if (i < network->num_layers - 1) {
-            fread(&rows, sizeof(int), 1, file);
-            fread(&cols, sizeof(int), 1, file);
-            layer->W = matrix_create(rows, cols);
-            for (int r = 0; r < rows; r++) {
-                fread(layer->W->data[r], sizeof(double), cols, file);
+    network->num_layers = num_layers;
+    network->layers = calloc(num_layers, sizeof(Layer));
+    if (!network->layers) {
+        perror("Error allocating layers array");
+        free(dims);
+        fclose(file);
+        return;
+    }
+
+    for (int i = 0; i < num_layers; ++i) {
+        Layer* L = &network->layers[i];
+        int rows = dims[i];
+        if (i > 0) {
+            L->A  = matrix_create(rows, 1);
+            L->Z  = matrix_create(rows, 1);
+            L->dA = matrix_create(rows, 1);
+            L->dZ = matrix_create(rows, 1);
+        } else {
+            L->A = NULL;
+            L->Z = NULL;
+            L->dA = NULL;
+            L->dZ = NULL;
+        }
+        if (i > 0) {
+            int prev = dims[i-1];
+            L->W  = matrix_create(rows, prev);
+            L->dW = matrix_create(rows, prev);
+            L->b  = matrix_create(rows, 1);
+            L->db = matrix_create(rows, 1);
+        } else {
+            L->W = L->dW = NULL;
+            L->b = L->db = NULL;
+        }
+    }
+
+    // For each layer i=1..num_layers-1, read W and b
+    for (int i = 1; i < num_layers; ++i) {
+        Layer* L = &network->layers[i];
+        int rows = L->W->row, cols = L->W->col;
+        for (int r = 0; r < rows; ++r) {
+            if (fread(L->W->data[r], sizeof(double), cols, file) != (size_t)cols) {
+                perror("Error reading weight data");
+                free(dims);
+                fclose(file);
+                return;
             }
         }
-
-        if (i > 0) {
-            fread(&rows, sizeof(int), 1, file);
-            fread(&cols, sizeof(int), 1, file);
-            layer->b = matrix_create(rows, cols);
-            fread(layer->b->data[0], sizeof(double), rows * cols, file);
+        if (fread(L->b->data[0], sizeof(double), rows, file) != (size_t)rows) {
+            perror("Error reading bias data");
+            free(dims);
+            fclose(file);
+            return;
         }
     }
-
+    free(dims);
     fclose(file);
-    return network;
 }
 

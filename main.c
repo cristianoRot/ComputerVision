@@ -1,10 +1,15 @@
 // main.c
 #include <stdio.h>
 #include "NeuralNetwork/neuralnetwork.h"
-#include "NeuralNetwork/Matrix/matrix.h" 
+#include "DatasetParser/dataset_parser.h"
 
 int main() {
-    int layers[5] = { 1024, 512, 128, 256, 19};
+
+    Dataset* dataset;
+
+    dataset_parse(dataset);
+
+    int layers[5] = { 784, 64, 128, 32, 19 };
     NeuralNetwork* neuralNetwork = neuralNetwork_create(layers, 5);
 
     if (neuralNetwork == NULL) {
@@ -12,5 +17,11 @@ int main() {
         return 1;
     }
 
-    neuralNetwork_train(neuralNetwork, "/Users/cristiano/Desktop/ComputerVision/dataset", 10);
+    neuralNetwork_train(
+        neuralNetwork, 
+        dataset,
+        "/Users/cristiano/Desktop/ComputerVision/model",
+        19,
+        10
+    );
 }
