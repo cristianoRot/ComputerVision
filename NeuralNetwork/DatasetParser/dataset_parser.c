@@ -5,11 +5,11 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #define STB_IMAGE_IMPLEMENTATION
-#include "/Users/cristiano/stb_image/stb_image.h"
+#include "../../stb_image/stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "/Users/cristiano/stb_image/stb_image_write.h"
+#include "../../stb_image/stb_image_write.h"
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
-#include "/Users/cristiano/stb_image/stb_image_resize2.h"
+#include "../../stb_image/stb_image_resize2.h"
 
 int load_image_folder(Dataset* ds, const char* root_path, int canvas_size, int num_classes) {
     if (!ds || !root_path || canvas_size <= 0 || num_classes <= 0) return -1;

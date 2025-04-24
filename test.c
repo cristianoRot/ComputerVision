@@ -2,9 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include "/Users/cristiano/stb_image/stb_image.h"
-#include "/Users/cristiano/stb_image/stb_image_write.h"
-#include "/Users/cristiano/stb_image/stb_image_resize2.h"
+#include "stb_image/stb_image.h"
+#include "stb_image/stb_image_write.h"
+#include "stb_image/stb_image_resize2.h"
 
 #include "NeuralNetwork/neuralnetwork.h"
 #include "NeuralNetwork/Matrix/matrix.h"
