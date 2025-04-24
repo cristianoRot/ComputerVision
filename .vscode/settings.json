@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "dataset_parser.h": "c",
+        "neuralnetwork.h": "c",
+        "stdlib.h": "c",
+        "matrix.h": "c"
+    }
+}

@@ -35,4 +35,6 @@ int load_csv(Dataset* ds, const char* csv_path, int num_features, int num_classe
  */
 void free_dataset(Dataset* ds);
 
+void dataset_print(const Dataset* ds);
+
 #endif

@@ -1,6 +1,7 @@
 // NeuralNetwork.c
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <time.h>
 #include <unistd.h>
 #include "neuralnetwork.h" 
@@ -10,7 +11,11 @@
 #include <Accelerate/Accelerate.h>
 
 const char* model_path;
-double learning_rate = 0.01;
+double learning_rate;
+
+const double INITIAL_LEARNING_RATE = 0.01;
+const double DECAY_FACTOR = 0.5;
+const int DECAY_STEP_SIZE = 500;  
 
 NeuralNetwork* neuralNetwork_create(int* layer_dims, int num_layers) {
     NeuralNetwork* net = malloc(sizeof(NeuralNetwork));
@@ -70,28 +75,30 @@ void neuralNetwork_train(NeuralNetwork* network, Dataset* dataset, const char* m
     }
 
     int num_layers = network->num_layers;
-    double lastAccuracy = 0.0;
+    double bestAccuracy = 0.0;
 
     // Seed the random number generator once
     srand((unsigned)time(NULL));
 
     for (int epoch = 1; epoch <= epochs; ++epoch) {
+        adjust_learning_rate(epoch);
+
         printf("=== Epoch %d ===\n", epoch);
 
         int correct_prediction = 0;
 
         int* indices = FisherYates_shuffle(dataset->N);
 
-        for (int k = 0; k < dataset->N; ++k) {
+        for (int k = 0; k < dataset->N; k++) {
             int i = indices[k];
             Matrix* x = dataset->X[i];
             Matrix* y_true = dataset->Y[i];
 
             forward_prop(network, x);
 
-            int max_output_index = get_max_output_node_index(network);
+            int class_predicted = get_max_output_node_index(network->layers[num_layers - 1].A);
 
-            if (matrix_get(y_true, max_output_index, 0) == 1.0) {
+            if (matrix_get(y_true, class_predicted, 0) == 1.0) {
                 correct_prediction++;
             }
             
@@ -101,14 +108,12 @@ void neuralNetwork_train(NeuralNetwork* network, Dataset* dataset, const char* m
 
         double accuracy = (double)correct_prediction / dataset->N;
 
-        if (accuracy > lastAccuracy) {
+        if (accuracy > bestAccuracy) {
             save_model(network, model_path);
-            lastAccuracy = accuracy;
+            bestAccuracy = accuracy;
         }
 
-        printf("Epoch %d accuracy: %.2f%%\n", epoch, accuracy * 100.0);
-
-        adjust_learning_rate(epoch);
+        printf("Epoch %d accuracy: %.5f%%\n", epoch, accuracy * 100.0);
     }
 
     free_dataset(dataset);
@@ -116,7 +121,23 @@ void neuralNetwork_train(NeuralNetwork* network, Dataset* dataset, const char* m
 
 int neuralNetwork_predict(NeuralNetwork* network, Matrix* input) {
     forward_prop(network, input);
-    return get_max_output_node_index(network);
+    return get_max_output_node_index(network->layers[network->num_layers - 1].A);
+}
+
+double neuralNetwork_test(NeuralNetwork* network, Dataset* dataset, int num_classes) {
+    int correct_prediction = 0;
+
+    for (int i = 0; i < dataset->N; ++i) {
+        Matrix* x = dataset->X[i];
+        Matrix* y_true = dataset->Y[i];
+
+        int class_predicted = neuralNetwork_predict(network, x);
+        int class_true = get_max_output_node_index(y_true);
+
+        if (class_true == class_predicted) correct_prediction++;
+    }
+
+    return (double)correct_prediction / dataset->N;
 }
 
 int* FisherYates_shuffle(int size) {
@@ -137,9 +158,8 @@ int* FisherYates_shuffle(int size) {
 }
 
 void adjust_learning_rate(int epoch) {
-    if (epoch % 10 == 0 && epoch != 0) {
-        learning_rate *= 0.9;
-    }
+    int num_decays = (epoch > 0) ? (epoch - 1) / DECAY_STEP_SIZE : 0;
+    learning_rate = INITIAL_LEARNING_RATE * pow(DECAY_FACTOR, num_decays);
 }
 
 void back_prop(NeuralNetwork* network, Matrix* y_true) {
@@ -308,15 +328,13 @@ void RELU_backward(const Matrix* Z, Matrix* dA, Matrix* dZ) {
     for (int r = 0; r < rows; ++r) {
         for (int c = 0; c < cols; ++c) 
         {
-            char act_der = RELU_der(Z->data[r][c]);
+            double act_der = RELU_der(Z->data[r][c]);
             dZ->data[r][c] = dA->data[r][c] * act_der;
         }
     }
 }
 
-int get_max_output_node_index(NeuralNetwork* network) {
-    Matrix* output_layer = network->layers[network->num_layers - 1].A;
-
+int get_max_output_node_index(Matrix* output_layer) {
     double max = matrix_get(output_layer, 0, 0);
     int index = 0;
 

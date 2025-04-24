@@ -24,12 +24,12 @@ Matrix* matrix_create(int row, int col) {
     return data;
 }
 
-double matrix_get(Matrix* data, int r, int c) {
-    return data->data[r][c];
+double matrix_get(Matrix* matrix, int r, int c) {
+    return matrix->data[r][c];
 }
 
-void matrix_set(Matrix* data, int r, int c, double v) {
-    data->data[r][c] = v;
+void matrix_set(Matrix* matrix, int r, int c, double v) {
+    matrix->data[r][c] = v;
 }
 
 Matrix* matrix_random(int rows, int cols) {
@@ -51,19 +51,19 @@ Matrix* matrix_random(int rows, int cols) {
     return m;
 }
 
-Matrix* matrix_T(Matrix* data) {
-    if(data == NULL) {
+Matrix* matrix_T(Matrix* matrix) {
+    if(matrix == NULL) {
         printf("Unable to transpose.");  
         return NULL;
     }
 
-    Matrix* matrix_T = matrix_create(data->col, data->row);
+    Matrix* matrix_T = matrix_create(matrix->col, matrix->row);
 
     if (matrix_T == NULL) return NULL;
 
-    for(int r = 0; r < data->row; r++){
-        for(int c = 0; c < data->col; c++){
-            matrix_T->data[c][r] = data->data[r][c];
+    for(int r = 0; r < matrix->row; r++){
+        for(int c = 0; c < matrix->col; c++){
+            matrix_T->data[c][r] = matrix->data[r][c];
         }
     }
 
@@ -165,9 +165,9 @@ Matrix* matrix_linear_product(Matrix* m1, Matrix* m2) {
     return result;
 }
 
-Matrix* matrix_column_sum(const Matrix* mat) {
-    int rows = mat->row;
-    int cols = mat->col;
+Matrix* matrix_column_sum(const Matrix* matrix) {
+    int rows = matrix->row;
+    int cols = matrix->col;
 
     Matrix* result = matrix_create(rows, 1);
     if (!result) return NULL;
@@ -175,7 +175,7 @@ Matrix* matrix_column_sum(const Matrix* mat) {
     for (int i = 0; i < rows; i++) {
         double sum = 0.0;
         for (int j = 0; j < cols; j++) {
-            sum += mat->data[i][j];
+            sum += matrix->data[i][j];
         }
         result->data[i][0] = sum;
     }

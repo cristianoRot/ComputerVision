@@ -32,6 +32,8 @@ NeuralNetwork* neuralNetwork_create(int* layer_dims, int count_layers);
 
 void neuralNetwork_train(NeuralNetwork* network, Dataset* dataset, const char* model_path_, int num_classes, int epochs);
 
+double neuralNetwork_test(NeuralNetwork* network, Dataset* dataset, int num_classes);
+
 int neuralNetwork_predict(NeuralNetwork* network, Matrix* input);
 
 int* FisherYates_shuffle(int size);
@@ -54,7 +56,7 @@ double RELU_der(double pointer);
 
 void RELU_backward(const Matrix* Z, Matrix* dA, Matrix* dZ);
 
-int get_max_output_node_index(NeuralNetwork* network);
+int get_max_output_node_index(Matrix* output_layer);
 
 void save_model(NeuralNetwork* network, const char* filename);
 

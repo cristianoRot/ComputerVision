@@ -56,10 +56,12 @@ int load_image_folder(Dataset* ds, const char* root_path, int canvas_size, int n
             if (!data) continue;
 
             unsigned char* gray_orig = malloc(w * h);
+
             if (!gray_orig) {
                 stbi_image_free(data);
                 continue;
             }
+            
             for (int i = 0; i < w * h; ++i) {
                 int sum = 0;
                 for (int ch = 0; ch < channels; ++ch) {
@@ -74,17 +76,21 @@ int load_image_folder(Dataset* ds, const char* root_path, int canvas_size, int n
                                       resized, canvas_size, canvas_size, 0, 1);
             free(gray_orig);
 
-            Matrix* img = matrix_create(canvas_size * canvas_size, 1);
-            for (int i = 0; i < canvas_size * canvas_size; ++i) {
-                img->data[i][0] = resized[i] / 255.0;
+            int final_num_features = canvas_size * canvas_size;
+
+            Matrix* img_matrix = matrix_create(canvas_size * canvas_size, 1);
+
+            for (int i = 0; i < final_num_features; ++i) {
+                img_matrix->data[i][0] = (double)resized[i] / 255.0;
             }
+
             free(resized);
 
             Matrix* label = matrix_create(num_classes, 1);
             for (int i = 0; i < num_classes; ++i) label->data[i][0] = 0.0;
             label->data[c][0] = 1.0;
 
-            ds->X[idx] = img;
+            ds->X[idx] = img_matrix;
             ds->Y[idx] = label;
             idx++;
         }
@@ -101,6 +107,13 @@ int load_csv(Dataset* ds, const char* csv_path, int num_features, int num_classe
 
     char line[4096];
     int count = 0;
+
+    // Skip header line
+    if (!fgets(line, sizeof(line), f)) {
+        fclose(f);
+        return -1;
+    }
+
     while (fgets(line, sizeof(line), f)) {
         char* ptr = line;
         while (*ptr == ' ' || *ptr == '\t') ptr++;
@@ -110,6 +123,9 @@ int load_csv(Dataset* ds, const char* csv_path, int num_features, int num_classe
     ds->X = malloc(sizeof(Matrix*) * count);
     ds->Y = malloc(sizeof(Matrix*) * count);
     rewind(f);
+    
+    // Skip header before parsing
+    fgets(line, sizeof(line), f);
 
     int idx = 0;
     while (fgets(line, sizeof(line), f)) {
@@ -147,4 +163,41 @@ void free_dataset(Dataset* ds) {
     free(ds->Y);
     ds->X = ds->Y = NULL;
     ds->N = 0;
+}
+
+void dataset_print(const Dataset* ds) {
+    if (ds == NULL) {
+        printf("Error: Dataset pointer is NULL.\n");
+        return;
+    }
+
+    printf("--- Dataset Content (%d examples) ---\n", ds->N);
+
+    if (ds->X == NULL || ds->Y == NULL) {
+        printf("Warning: Dataset X or Y arrays are NULL.\n");
+        return;
+    }
+
+
+    for (int i = 0; i < ds->N; ++i) {
+        printf("Example %d:\n", i);
+
+        printf("  Input (X[%d]):\n", i);
+        if (ds->X[i] != NULL) {
+            matrix_print(ds->X[i]);
+        } else {
+            printf("    Matrix pointer is NULL.\n");
+        }
+
+        printf("  True Label (Y[%d]):\n", i);
+        if (ds->Y[i] != NULL) {
+            matrix_print(ds->Y[i]);
+        } else {
+            printf("    Matrix pointer is NULL.\n");
+        }
+
+        printf("---\n");
+    }
+
+    printf("--- End Dataset Content ---\n");
 }
