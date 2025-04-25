@@ -4,16 +4,15 @@
 #include "NeuralNetwork/DatasetParser/dataset_parser.h"
 
 int main() {
-
     Dataset dataset;
-    int num_classes = 26;
-    int layers[5] = { 784, 64, 128, 32, num_classes };
+    int num_classes = 19;
+    int layers[5] = { 4096, 1024, 512, 128, num_classes };
 
-    int epochs = 10;
+    int epochs = 100;
 
     printf("Reading dataset...\n");
 
-    int total_data = load_csv(&dataset, "/Users/cristiano/Desktop/DigitRecognizer/digital_letters.csv", 784, num_classes);
+    int total_data = load_image_folder(&dataset, "dataset", 64, num_classes);
 
     NeuralNetwork* neuralNetwork = neuralNetwork_create(layers, sizeof(layers) / sizeof(int));
 
@@ -32,7 +31,7 @@ int main() {
 
     free_dataset(&dataset);
 
-    total_data = load_csv(&dataset, "/Users/cristiano/Desktop/DigitRecognizer/digital_letters.csv", 28, num_classes);
+    total_data = load_image_folder(&dataset, "dataset", 64, num_classes);
 
     double accuracy = neuralNetwork_test(
         neuralNetwork,

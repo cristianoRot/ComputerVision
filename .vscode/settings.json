@@ -3,6 +3,10 @@
         "dataset_parser.h": "c",
         "neuralnetwork.h": "c",
         "stdlib.h": "c",
-        "matrix.h": "c"
+        "matrix.h": "c",
+        "array": "c",
+        "string": "c",
+        "string_view": "c",
+        "vector": "c"
     }
 }

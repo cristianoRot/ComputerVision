@@ -1,13 +1,7 @@
 // NeuralNetwork.c
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <time.h>
-#include <unistd.h>
-#include "neuralnetwork.h" 
+
+#include "neuralnetwork.h"
 #include "Matrix/matrix.h"
-#include <math.h>
-#include <dirent.h>
 #include <Accelerate/Accelerate.h>
 
 const char* model_path;
@@ -211,18 +205,17 @@ void back_prop(NeuralNetwork* network, Matrix* y_true) {
         layer->db = matrix_column_sum(layer->dZ);
     }
 
+    // --- UPDATE WEIGHTS AND BIASES ---
     for (int l = 1; l < network->num_layers; ++l) {
         Layer* layer = &network->layers[l];
-    
-        for (int i = 0; i < layer->W->row; ++i) {
-            for (int j = 0; j < layer->W->col; ++j) {
-                layer->W->data[i][j] -= learning_rate * layer->dW->data[i][j];
-            }
-        }
-    
-        for (int i = 0; i < layer->b->row; ++i) {
-            layer->b->data[i][0] -= learning_rate * layer->db->data[i][0];
-        }
+        int sizeW = layer->W->row * layer->W->col;
+        cblas_daxpy(sizeW, -learning_rate,
+                    layer->dW->data, 1,
+                    layer->W->data, 1);
+        int sizeB = layer->b->row;
+        cblas_daxpy(sizeB, -learning_rate,
+                    layer->db->data, 1,
+                    layer->b->data, 1);
     }
 }
 
@@ -272,32 +265,30 @@ Matrix* onehot(int label, int num_classes) {
 void softmax(const Matrix *in, Matrix *out) {
     int R = in->row;
     int C = in->col;
+    int in_stride = in->col;
+    int out_stride = out->col;
 
     for (int j = 0; j < C; ++j) {
-        double max_val = in->data[0][j];
-        for (int i = 1; i < R; ++i) {
-            double v = in->data[i][j];
-            if (v > max_val) {
-                max_val = v;
-            }
-        }
+        const double* current_in_col = in->data + j;
+        double* current_out_col = out->data + j;
 
-        double sum_exp = 0.0;
-        for (int i = 0; i < R; ++i) {
-            double e = exp(in->data[i][j] - max_val);
-            out->data[i][j] = e;
-            sum_exp += e;
-        }
+        double max_val;
+        vDSP_maxvD(current_in_col, in_stride, &max_val, R);
 
-        if (sum_exp == 0.0) {
-            double uniform = 1.0 / R;
-            for (int i = 0; i < R; ++i) {
-                out->data[i][j] = uniform;
-            }
+        double neg_max_val = -max_val;
+        vDSP_vsaddD(current_in_col, in_stride, &neg_max_val, current_out_col, out_stride, R);
+        vvexp(current_out_col, current_out_col, &R);
+
+        double sum_exp;
+        vDSP_sveD(current_out_col, out_stride, &sum_exp, R);
+
+        if (sum_exp <= 0.0) {
+             double uniform_val = 1.0 / R;
+             vDSP_vfillD(&uniform_val, current_out_col, out_stride, R);
+
         } else {
-            for (int i = 0; i < R; ++i) {
-                out->data[i][j] /= sum_exp;
-            }
+            double inv_sum_exp = 1.0 / sum_exp;
+            vDSP_vsmulD(current_out_col, out_stride, &inv_sum_exp, current_out_col, out_stride, R);
         }
     }
 }
@@ -306,31 +297,27 @@ double RELU(double x) {
     return x > 0 ? x : 0.0;
 }
 
-void RELU_matrix(Matrix* matrixIn, Matrix* matrixOut) {
-    int row_count = matrixIn->row;
-    int col_count = matrixIn->col;
+void RELU_matrix(const Matrix* matrixIn, Matrix* matrixOut) {
+    int total_elements = matrixIn->row * matrixIn->col;
+    double zero_scalar = 0.0;
 
-    for (int r = 0; r < row_count; r++) {
-        for (int c = 0; c < col_count; c++) {
-            matrixOut->data[r][c] = RELU(matrixIn->data[r][c]);
-        }
-    }
+    vDSP_vthrD(matrixIn->data, 1, &zero_scalar, matrixOut->data, 1, total_elements);
 }
 
 double RELU_der(double pointer) {
     return pointer > 0 ? 1.0 : 0.0;
 }
 
-void RELU_backward(const Matrix* Z, Matrix* dA, Matrix* dZ) {
-    int rows = Z->row;
-    int cols = Z->col;
+void RELU_backward(const Matrix* Z, const Matrix* dA, Matrix* dZ) {
+    int total_elements = Z->row * Z->col;
 
-    for (int r = 0; r < rows; ++r) {
-        for (int c = 0; c < cols; ++c) 
-        {
-            double act_der = RELU_der(Z->data[r][c]);
-            dZ->data[r][c] = dA->data[r][c] * act_der;
-        }
+    for (int i = 0; i < total_elements; ++i) {
+        double z_val = Z->data[i];
+        double dA_val = dA->data[i];
+
+        double dZ_val = dA_val * RELU_der(z_val);
+
+        dZ->data[i] = dZ_val;
     }
 }
 
@@ -422,21 +409,17 @@ void save_model(NeuralNetwork* network, const char* filename) {
         int cols_w = L->W->col;
         int rows_b = L->b->row;
 
-        for (int r = 0; r < rows_w; ++r) {
-            if (fwrite(L->W->data[r], sizeof(double), cols_w, file) != (size_t)cols_w) {
-                perror("Error writing weight data");
-                fclose(file);
-                return; // Exit on error
-            }
+        if (fwrite(L->W->data, sizeof(double), (size_t)rows_w * cols_w, file) != (size_t)rows_w * cols_w) {
+            perror("Error writing all weight data for a layer");
+            fclose(file);
+            return;
         }
 
-        for (int r = 0; r < rows_b; ++r) {
-             if (fwrite(&L->b->data[r][0], sizeof(double), 1, file) != 1) {
-                perror("Error writing bias data element");
-                fclose(file);
-                return; // Exit on error
-             }
-        }
+        if (fwrite(L->b->data, sizeof(double), (size_t)rows_b, file) != (size_t)rows_b) {
+            perror("Error writing all bias data for a layer");
+            fclose(file);
+            return;
+         }
     }
 
     fclose(file);
@@ -549,19 +532,15 @@ void load_model(NeuralNetwork* network, const char* filename) {
         int cols_w = L->W->col;
         int rows_b = L->b->row;
 
-        for (int r = 0; r < rows_w; ++r) {
-            if (fread(L->W->data[r], sizeof(double), cols_w, file) != (size_t)cols_w) {
-                perror("Error reading weight data");
-                goto load_error; // Jump to cleanup on error
-            }
+        if (fread(L->W->data, sizeof(double), (size_t)rows_w * cols_w, file) != (size_t)rows_w * cols_w) {
+            perror("Error reading all weight data for a layer");
+            goto load_error;
         }
 
-        for (int r = 0; r < rows_b; ++r) {
-             if (fread(&L->b->data[r][0], sizeof(double), 1, file) != 1) {
-                perror("Error reading bias data element");
-                goto load_error; // Jump to cleanup on error
-             }
-        }
+        if (fread(L->b->data, sizeof(double), (size_t)rows_b, file) != (size_t)rows_b) {
+            perror("Error reading all bias data for a layer");
+            goto load_error; // Salta alla cleanup in caso di errore
+         }
     }
 
     free(dims);

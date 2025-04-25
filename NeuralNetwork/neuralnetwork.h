@@ -50,11 +50,11 @@ void softmax(const Matrix *in, Matrix *out);
 
 double RELU(double x);
 
-void RELU_matrix(Matrix* in, Matrix* out);
+void RELU_matrix(const Matrix* matrixIn, Matrix* matrixOut);
 
 double RELU_der(double pointer);
 
-void RELU_backward(const Matrix* Z, Matrix* dA, Matrix* dZ);
+void RELU_backward(const Matrix* Z, const Matrix* dA, Matrix* dZ);
 
 int get_max_output_node_index(Matrix* output_layer);
 

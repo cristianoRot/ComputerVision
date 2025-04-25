@@ -4,6 +4,8 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <errno.h>
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "../../stb_image/stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -81,14 +83,18 @@ int load_image_folder(Dataset* ds, const char* root_path, int canvas_size, int n
             Matrix* img_matrix = matrix_create(canvas_size * canvas_size, 1);
 
             for (int i = 0; i < final_num_features; ++i) {
-                img_matrix->data[i][0] = (double)resized[i] / 255.0;
+                img_matrix->data[i] = (double)resized[i] / 255.0;
             }
 
             free(resized);
 
             Matrix* label = matrix_create(num_classes, 1);
-            for (int i = 0; i < num_classes; ++i) label->data[i][0] = 0.0;
-            label->data[c][0] = 1.0;
+
+            for (int i = 0; i < num_classes; ++i) {
+                label->data[i] = 0.0;
+            }
+
+            label->data[c] = 1.0;
 
             ds->X[idx] = img_matrix;
             ds->Y[idx] = label;
@@ -100,7 +106,117 @@ int load_image_folder(Dataset* ds, const char* root_path, int canvas_size, int n
     return idx;
 }
 
-int load_csv(Dataset* ds, const char* csv_path, int num_features, int num_classes) {
+int load_csv_label_first(Dataset* ds, const char* csv_path, int num_features, int num_classes) {
+    if (!ds || !csv_path) return -1;
+    FILE* f = fopen(csv_path, "r");
+    if (!f) return -1;
+
+    char line[4096];
+    int count = 0;
+
+    if (!fgets(line, sizeof(line), f)) {
+        fclose(f);
+        return -1;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        char* ptr = line;
+        while (*ptr == ' ' || *ptr == '\t') ptr++;
+        if (*ptr && *ptr != '\n' && *ptr != '\r') count++;
+    }
+    if (count == 0) {
+        fclose(f);
+        return 0;
+    }
+
+    ds->X = malloc(sizeof(Matrix*) * count);
+    if (!ds->X) {
+        fclose(f);
+        return -1;
+    }
+    ds->Y = malloc(sizeof(Matrix*) * count);
+     if (!ds->Y) {
+        free(ds->X);
+        fclose(f);
+        return -1;
+    }
+
+    rewind(f);
+
+    if (!fgets(line, sizeof(line), f)) {
+         free(ds->X); free(ds->Y);
+         fclose(f);
+         return -1;
+    }
+
+    int idx = 0;
+
+    while (fgets(line, sizeof(line), f)) {
+        char* ptr = line;
+        while (*ptr == ' ' || *ptr == '\t') ptr++;
+        if (!*ptr || *ptr == '\n' || *ptr == '\r') continue;
+
+        Matrix* feat = matrix_create(num_features, 1);
+        Matrix* lab  = matrix_create(num_classes, 1);
+
+        if (!feat || !lab) {
+            fprintf(stderr, "Error allocating matrices for line %d.\n", idx + 2);
+            for (int k = 0; k < idx; ++k) {
+                matrix_free(ds->X[k]);
+                matrix_free(ds->Y[k]);
+            }
+            free(ds->X); free(ds->Y);
+            matrix_free(feat); matrix_free(lab);
+            fclose(f);
+            return -1;
+        }
+
+        char* token = strtok(line, ",");
+        if (!token) {
+            fprintf(stderr, "Error parsing line %d: Missing label token.\n", idx + 2);
+            matrix_free(feat); matrix_free(lab);
+            continue;
+        }
+
+        int cls = atoi(token);
+        if (cls < 0 || cls >= num_classes) {
+             fprintf(stderr, "Error parsing line %d: Invalid class index %d (expected 0-%d).\n", idx + 2, cls, num_classes - 1);
+             matrix_free(feat); matrix_free(lab);
+             continue;
+        }
+
+        token = strtok(NULL, ",");
+        int i = 0; // Contatore per le feature
+
+        while (token && i < num_features) {
+            feat->data[i] = strtod(token, NULL);
+            token = strtok(NULL, ",");
+            i++;
+        }
+
+        if (i != num_features) {
+            fprintf(stderr, "Error parsing line %d: Expected %d features, but found %d.\n", idx + 2, num_features, i);
+            matrix_free(feat); matrix_free(lab);
+            continue;
+        }
+
+
+        for (int j = 0; j < num_classes; ++j) {
+            lab->data[j] = (j == cls) ? 1.0 : 0.0;
+        }
+
+        ds->X[idx] = feat;
+        ds->Y[idx] = lab;
+        idx++; // Incrementa l'indice del dataset
+    }
+
+    fclose(f);
+
+    ds->N = idx;
+    return idx;
+}
+
+int load_csv_label_last(Dataset* ds, const char* csv_path, int num_features, int num_classes) {
     if (!ds || !csv_path) return -1;
     FILE* f = fopen(csv_path, "r");
     if (!f) return -1;
@@ -137,13 +253,18 @@ int load_csv(Dataset* ds, const char* csv_path, int num_features, int num_classe
         Matrix* lab  = matrix_create(num_classes, 1);
         char* token = strtok(line, ",");
         int i = 0;
+
         while (token && i < num_features) {
-            feat->data[i][0] = strtod(token, NULL);
+            feat->data[i] = strtod(token, NULL);
             token = strtok(NULL, ",");
             i++;
         }
+
         int cls = token ? atoi(token) : 0;
-        for (int j = 0; j < num_classes; ++j) lab->data[j][0] = (j == cls);
+
+        for (int j = 0; j < num_classes; ++j) {
+            lab->data[j] = (j == cls) ? 1.0 : 0.0;
+        }
 
         ds->X[idx] = feat;
         ds->Y[idx] = lab;
@@ -200,4 +321,55 @@ void dataset_print(const Dataset* ds) {
     }
 
     printf("--- End Dataset Content ---\n");
+}
+
+int save_matrix_as_image(const Matrix* matrix, const char* filepath) {
+    if (matrix == NULL || matrix->data == NULL) {
+        fprintf(stderr, "Error in save_matrix_as_image: Input matrix is NULL or data is NULL.\n");
+        return -1;
+    }
+    if (filepath == NULL || *filepath == '\0') {
+         fprintf(stderr, "Error in save_matrix_as_image: Output filepath is invalid (NULL or empty).\n");
+         return -1;
+    }
+
+    int total_pixels = matrix->row;
+    int channels = 1;
+
+    int width = (int)round(sqrt(total_pixels));
+    int height = width;
+
+    if (width * height != total_pixels || matrix->col != 1) {
+        fprintf(stderr, "Error in save_matrix_as_image: Matrix dimensions (%dx%d) are incompatible with a flattened %dx%d grayscale image (%d total pixels). Check matrix->row matches width*height and matrix->col is 1.\n",
+                matrix->row, matrix->col, width, height, total_pixels);
+        return -1;
+    }
+
+    unsigned char* pixel_buffer = malloc((size_t)total_pixels * channels);
+    if (!pixel_buffer) {
+        fprintf(stderr, "Error in save_matrix_as_image: Failed to allocate pixel buffer (%s).\n", strerror(errno));
+        return -1;
+    }
+
+    for (int i = 0; i < total_pixels; ++i) {
+        double double_value = matrix->data[i];
+
+        int byte_value = (int)(double_value * 255.0 + 0.5);
+        if (byte_value < 0) byte_value = 0;
+        if (byte_value > 255) byte_value = 255;
+
+        pixel_buffer[i] = (unsigned char)byte_value;
+    }
+
+    int success = stbi_write_png(filepath, width, height, channels, pixel_buffer, width * channels);
+
+    free(pixel_buffer);
+
+    if (!success) {
+        fprintf(stderr, "Error in save_matrix_as_image: Failed to write PNG file %s.\n", filepath);
+        return -1;
+    }
+
+    printf("Matrix successfully saved as grayscale PNG: %s (%dx%d)\n", filepath, width, height);
+    return 0;
 }
