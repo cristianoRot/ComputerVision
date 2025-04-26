@@ -1,5 +1,17 @@
 // NeuralNetwork.c
 
+/*
+    * This file contains the implementation of a simple feedforward neural network
+    * with backpropagation and training capabilities.
+    *
+    * The neural network supports multiple layers, including input, hidden, and output layers.
+    * It uses the ReLU activation function for hidden layers and softmax for the output layer.
+    *
+    * The code also includes functions for training the network, making predictions,
+    * and saving/loading the model to/from a file.
+    *
+*/
+
 #include "neuralnetwork.h"
 #include "Matrix/matrix.h"
 #include <Accelerate/Accelerate.h>
